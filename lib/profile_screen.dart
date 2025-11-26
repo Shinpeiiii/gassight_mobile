@@ -11,6 +11,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, String?> _profile = {};
+  bool _loading = true;
 
   @override
   void initState() {
@@ -19,13 +20,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
+    setState(() => _loading = true);
     final data = await AuthService.getUserProfile();
     if (!mounted) return;
 
-    setState(() => _profile = data);
+    setState(() {
+      _profile = data;
+      _loading = false;
+    });
   }
 
   Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Logout"),
+        content: const Text("Are you sure you want to logout?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Logout"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     await AuthService.logout();
     if (!mounted) return;
 
@@ -38,111 +64,251 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = _profile;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
       appBar: AppBar(
         title: const Text("My Profile"),
         backgroundColor: const Color(0xFF2C7A2C),
+        elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadProfile,
+            tooltip: "Refresh",
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
-          )
+            tooltip: "Logout",
+          ),
         ],
       ),
-      body: p.isEmpty
+      body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _header(p["full_name"] ?? "User"),
-
-                  const SizedBox(height: 24),
-                  _sectionTitle("Account Information"),
-                  _info("Username", p["username"]),
-                  _info("Full Name", p["full_name"]),
-                  _info("Email", p["email"]),
-                  _info("Phone", p["phone"]),
-
-                  const SizedBox(height: 24),
-                  _sectionTitle("Location Information"),
-                  _info("Province", p["province"]),
-                  _info("Municipality", p["municipality"]),
-                  _info("Barangay", p["barangay"]),
-
-                  const SizedBox(height: 40),
-                  Center(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2C7A2C),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 14, horizontal: 40),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text("Back"),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          : _buildProfileContent(),
     );
   }
 
-  Widget _header(String name) {
+  Widget _buildProfileContent() {
+    final p = _profile;
+    final name = p["full_name"] ?? p["username"] ?? "User";
+    final username = p["username"] ?? "N/A";
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          // Header with gradient background
+          Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF2C7A2C), Color(0xFF1E5A1E)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+            child: Column(
+              children: [
+                // Avatar with initial
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(
+                      _getInitials(name),
+                      style: const TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF2C7A2C),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Name
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                // Username
+                Text(
+                  "@$username",
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Profile Information Cards
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Account Information Section
+                _sectionHeader("Account Information", Icons.person),
+                const SizedBox(height: 12),
+                _infoCard("Username", p["username"], Icons.account_circle),
+                _infoCard("Full Name", p["full_name"], Icons.badge),
+                _infoCard("Email", p["email"], Icons.email),
+                _infoCard("Phone", p["phone"], Icons.phone),
+
+                const SizedBox(height: 24),
+
+                // Location Information Section
+                _sectionHeader("Location Information", Icons.location_on),
+                const SizedBox(height: 12),
+                _infoCard("Province", p["province"], Icons.map),
+                _infoCard("Municipality", p["municipality"], Icons.location_city),
+                _infoCard("Barangay", p["barangay"], Icons.home),
+
+                const SizedBox(height: 30),
+
+                // Action Buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text("Back"),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          foregroundColor: const Color(0xFF2C7A2C),
+                          side: const BorderSide(color: Color(0xFF2C7A2C)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _logout,
+                        icon: const Icon(Icons.logout),
+                        label: const Text("Logout"),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          backgroundColor: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Get initials from name
+  String _getInitials(String name) {
+    if (name.isEmpty) return "?";
+    final parts = name.trim().split(' ');
+    if (parts.length == 1) {
+      return parts[0][0].toUpperCase();
+    }
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  // Section header widget
+  Widget _sectionHeader(String title, IconData icon) {
     return Row(
       children: [
-        CircleAvatar(
-          radius: 40,
-          backgroundColor: const Color(0xFF2C7A2C),
-          child: Text(
-            name.isNotEmpty ? name[0].toUpperCase() : "?",
-            style: const TextStyle(color: Colors.white, fontSize: 32),
-          ),
-        ),
-        const SizedBox(width: 16),
+        Icon(icon, color: const Color(0xFF2C7A2C), size: 24),
+        const SizedBox(width: 8),
         Text(
-          name,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2C7A2C),
+          ),
         ),
       ],
     );
   }
 
-  Widget _sectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        title,
-        style: const TextStyle(
-            fontSize: 18, fontWeight: FontWeight.w700, color: Colors.black87),
-      ),
-    );
-  }
-
-  Widget _info(String label, String? value) {
+  // Info card widget with icon
+  Widget _infoCard(String label, String? value, IconData icon) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1)),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-          Text(value ?? "—"),
+          // Icon
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2C7A2C).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFF2C7A2C),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Label and Value
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value ?? "Not provided",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: value != null ? Colors.black87 : Colors.grey[400],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

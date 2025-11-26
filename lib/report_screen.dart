@@ -1,16 +1,14 @@
-// (Shortened beginning: imports unchanged)
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
 import 'services/offline_sync.dart';
 import 'login_screen.dart';
-import 'profile_screen.dart';   // <-- ✅ ADDED
+import 'profile_screen.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as latlng;
@@ -46,23 +44,15 @@ class _ReportScreenState extends State<ReportScreen> {
 
   String? _username;
   String? _fullName;
-  String? _phone;
-  String? _email;
 
   late OfflineSyncManager _offline;
-
   final MapController _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
-    _secureScreen(); // 👈 BLOCK SCREENSHOTS ON THIS SCREEN
     _offline = OfflineSyncManager(AuthService.baseUrl);
     _initAll();
-  }
-
-  /// Prevent screenshots and screen recording on this screen
-  Future<void> _secureScreen() async {
   }
 
   Future<void> _initAll() async {
@@ -79,8 +69,6 @@ class _ReportScreenState extends State<ReportScreen> {
     setState(() {
       _username = profile["username"];
       _fullName = profile["full_name"];
-      _email = profile["email"];
-      _phone = profile["phone"];
 
       _province.text = profile["province"] ?? "";
       _municipality.text = profile["municipality"] ?? "";
@@ -89,9 +77,30 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Future<void> _logout() async {
-    await AuthService.logout();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Logout"),
+        content: const Text("Are you sure you want to logout?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Logout"),
+          ),
+        ],
+      ),
+    );
 
+    if (confirm != true) return;
+
+    await AuthService.logout();
     if (!mounted) return;
+
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -113,8 +122,7 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Future<void> _pick(ImageSource s) async {
-    final pic =
-        await ImagePicker().pickImage(source: s, imageQuality: 75);
+    final pic = await ImagePicker().pickImage(source: s, imageQuality: 75);
     if (pic != null) setState(() => _image = File(pic.path));
   }
 
@@ -123,10 +131,39 @@ class _ReportScreenState extends State<ReportScreen> {
 
     if (_lat == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("⚠ Enable location first.")),
+        const SnackBar(
+          content: Text("⚠ Please enable location first."),
+          backgroundColor: Colors.orange,
+        ),
       );
       return;
     }
+
+    // Show confirmation dialog
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Submit Report"),
+        content: const Text(
+          "Are you sure you want to submit this report? Make sure all information is correct.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2C7A2C),
+            ),
+            child: const Text("Submit"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
 
     setState(() => _submitting = true);
 
@@ -169,7 +206,6 @@ class _ReportScreenState extends State<ReportScreen> {
         });
 
         req.fields["gps_metadata"] = jsonEncode(report["gps_metadata"]);
-
         req.files.add(await http.MultipartFile.fromPath("photo", _image!.path));
 
         res = await req.send();
@@ -195,20 +231,44 @@ class _ReportScreenState extends State<ReportScreen> {
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ Report submitted!")),
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text("✅ Report submitted successfully!"),
+              ],
+            ),
+            backgroundColor: Colors.green,
+          ),
         );
+        
+        // Reset form
         _formKey.currentState!.reset();
-        setState(() => _image = null);
+        setState(() {
+          _image = null;
+          _description.clear();
+        });
+        
+        // Reload location data
+        await _loadProfile();
       } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("❌ $body")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Error: $body"),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
-    } catch (_) {
+    } catch (e) {
       await _offline.saveOffline(report);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("📴 Offline: saved & will sync later.")),
+          content: Text("📴 Offline: Report saved & will sync when online."),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 4),
+        ),
       );
     }
 
@@ -222,20 +282,25 @@ class _ReportScreenState extends State<ReportScreen> {
       appBar: AppBar(
         title: const Text("Submit Report"),
         backgroundColor: const Color(0xFF2C7A2C),
+        elevation: 0,
         actions: [
+          // Profile Button
           IconButton(
-            icon: const Icon(Icons.person),   // <-- ✅ PROFILE BUTTON
+            icon: const Icon(Icons.person),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
               );
             },
+            tooltip: "Profile",
           ),
+          // Logout Button
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
-          )
+            tooltip: "Logout",
+          ),
         ],
       ),
       body: _buildUI(),
@@ -250,69 +315,91 @@ class _ReportScreenState extends State<ReportScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (_username != null)
-              Text("Reporter: $_username",
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
-
-            const SizedBox(height: 12),
-
-            _box(_province, "Province"),
-            _box(_municipality, "Municipality"),
-            _box(_barangay, "Barangay"),
-
-            const SizedBox(height: 14),
-
-            const Text("Infestation Type",
-                style:
-                    TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 5),
-            _drop(),
-
-            const SizedBox(height: 14),
-
-            _box(_description, "Description", maxLines: 3),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _lat != null
-                        ? "📍 ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}"
-                        : "Location not detected",
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.my_location,
-                      color: Color(0xFF2C7A2C)),
-                  onPressed: _getLocation,
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-
-            _map(),
-
-            const SizedBox(height: 14),
-
-            _photoPicker(),
+            // User Info Card
+            if (_username != null) _userInfoCard(),
 
             const SizedBox(height: 20),
 
+            // Location Fields
+            _sectionTitle("Location Information", Icons.location_on),
+            const SizedBox(height: 12),
+            _textField(_province, "Province", Icons.map),
+            _textField(_municipality, "Municipality", Icons.location_city),
+            _textField(_barangay, "Barangay", Icons.home),
+
+            const SizedBox(height: 20),
+
+            // Infestation Type
+            _sectionTitle("Infestation Details", Icons.bug_report),
+            const SizedBox(height: 12),
+            _infestationDropdown(),
+
+            const SizedBox(height: 14),
+
+            // Description
+            _textField(
+              _description,
+              "Description",
+              Icons.description,
+              maxLines: 4,
+              hint: "Describe the infestation in detail...",
+            ),
+
+            const SizedBox(height: 20),
+
+            // GPS Location
+            _sectionTitle("GPS Location", Icons.gps_fixed),
+            const SizedBox(height: 12),
+            _gpsCard(),
+
+            const SizedBox(height: 14),
+            _map(),
+
+            const SizedBox(height: 20),
+
+            // Photo
+            _sectionTitle("Photo Evidence", Icons.camera_alt),
+            const SizedBox(height: 12),
+            _photoPicker(),
+
+            const SizedBox(height: 30),
+
+            // Submit Button
             SizedBox(
               width: double.infinity,
+              height: 54,
               child: ElevatedButton(
                 onPressed: _submitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2C7A2C),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
                 ),
                 child: _submitting
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text("Submit Report"),
+                    ? const SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.send),
+                          SizedBox(width: 8),
+                          Text(
+                            "Submit Report",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ),
           ],
@@ -321,123 +408,379 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  Widget _box(TextEditingController c, String label, {int maxLines = 1}) {
+  // User info card
+  Widget _userInfoCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2C7A2C), Color(0xFF1E5A1E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                _username![0].toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2C7A2C),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Reporter",
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                  ),
+                ),
+                Text(
+                  _fullName ?? _username!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Section title
+  Widget _sectionTitle(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFF2C7A2C), size: 24),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2C7A2C),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Text field with icon
+  Widget _textField(
+    TextEditingController controller,
+    String label,
+    IconData icon, {
+    int maxLines = 1,
+    String? hint,
+  }) {
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: TextFormField(
-        controller: c,
+        controller: controller,
         maxLines: maxLines,
-        validator: (v) =>
-            v == null || v.trim().isEmpty ? "Required" : null,
+        validator: (v) => v == null || v.trim().isEmpty ? "Required" : null,
         decoration: InputDecoration(
-            border: InputBorder.none, labelText: label),
+          prefixIcon: Icon(icon, color: const Color(0xFF2C7A2C)),
+          labelText: label,
+          hintText: hint,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: Colors.white,
+        ),
       ),
     );
   }
 
-  Widget _drop() {
+  // Infestation dropdown
+  Widget _infestationDropdown() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: DropdownButtonFormField(
+      child: DropdownButtonFormField<String>(
         value: _infestationType,
         items: infestationTypes
-            .map((t) =>
-                DropdownMenuItem(value: t, child: Text(t)))
+            .map((t) => DropdownMenuItem(value: t, child: Text(t)))
             .toList(),
         onChanged: (v) => setState(() => _infestationType = v!),
-        decoration: const InputDecoration(border: InputBorder.none),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.pest_control, color: Color(0xFF2C7A2C)),
+          border: InputBorder.none,
+          labelText: "Infestation Type",
+        ),
       ),
     );
   }
 
+  // GPS card
+  Widget _gpsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Coordinates",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _lat != null
+                      ? "${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}"
+                      : "Location not detected",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: _lat != null ? Colors.black87 : Colors.red,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.my_location, color: Color(0xFF2C7A2C)),
+            onPressed: _getLocation,
+            tooltip: "Get Current Location",
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Map widget
   Widget _map() {
-    return SizedBox(
+    return Container(
       height: 220,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: _lat == null
             ? Container(
                 color: Colors.grey.shade200,
-                child: const Center(child: Text("Map not available")),
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.location_off, size: 48, color: Colors.grey),
+                      SizedBox(height: 8),
+                      Text(
+                        "Location not available",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
               )
             : FlutterMap(
                 mapController: _mapController,
                 options: MapOptions(
-                  center: latlng.LatLng(_lat!, _lng!),
-                  zoom: 15,
+                  initialCenter: latlng.LatLng(_lat!, _lng!),
+                  initialZoom: 15,
                 ),
                 children: [
                   TileLayer(
                     urlTemplate:
                         "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                   ),
-                  MarkerLayer(markers: [
-                    Marker(
-                      point: latlng.LatLng(_lat!, _lng!),
-                      width: 40,
-                      height: 40,
-                      child: const Icon(Icons.location_on,
-                          color: Colors.red, size: 36),
-                    )
-                  ])
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: latlng.LatLng(_lat!, _lng!),
+                        width: 40,
+                        height: 40,
+                        child: const Icon(
+                          Icons.location_on,
+                          color: Colors.red,
+                          size: 40,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
       ),
     );
   }
 
+  // Photo picker
   Widget _photoPicker() {
     return GestureDetector(
-      onTap: () => _bottom(),
+      onTap: _showImageSourceDialog,
       child: Container(
         height: 200,
         width: double.infinity,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300, width: 2),
           color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: _image == null
-            ? const Center(child: Text("📸 Tap to add photo"))
-            : ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Image.file(_image!, fit: BoxFit.cover),
+            ? const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_photo_alternate, size: 48, color: Colors.grey),
+                  SizedBox(height: 8),
+                  Text(
+                    "📸 Tap to add photo",
+                    style: TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    "Camera or Gallery",
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              )
+            : Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      _image!,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
+                      onPressed: () => setState(() => _image = null),
+                    ),
+                  ),
+                ],
               ),
       ),
     );
   }
 
-  void _bottom() {
+  // Show image source dialog
+  void _showImageSourceDialog() {
     showModalBottomSheet(
       context: context,
-      builder: (_) => Wrap(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.camera_alt),
-            title: const Text("Camera"),
-            onTap: () {
-              Navigator.pop(context);
-              _pick(ImageSource.camera);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library),
-            title: const Text("Gallery"),
-            onTap: () {
-              Navigator.pop(context);
-              _pick(ImageSource.gallery);
-            },
-          ),
-        ],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Choose Photo Source",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Color(0xFF2C7A2C)),
+              title: const Text("Camera"),
+              onTap: () {
+                Navigator.pop(context);
+                _pick(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF2C7A2C)),
+              title: const Text("Gallery"),
+              onTap: () {
+                Navigator.pop(context);
+                _pick(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
