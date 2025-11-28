@@ -44,6 +44,7 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   exif: ^2.0.2
   image: ^4.0.14
+  crypto: ^3.0.3
 
   local_auth: ^2.1.7
 
