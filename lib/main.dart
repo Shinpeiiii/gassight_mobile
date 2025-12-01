@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
-import 'login_screen.dart';
-import 'user_dashboard.dart';
-import 'app_lock_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/user_dashboard.dart';
+import 'screens/app_lock_screen.dart';
 import 'services/app_lock_service.dart';
 import 'services/auth_service.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize notifications
+  await NotificationService.initialize();
+  
   runApp(const MyApp());
 }
 

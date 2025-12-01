@@ -4,10 +4,11 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as latlng;
 
-import 'services/auth_service.dart';
+import '../services/auth_service.dart';
 import 'profile_screen.dart';
 import 'report_screen.dart';
 import 'login_screen.dart';
+import 'notifications_screen.dart';
 
 class UserDashboard extends StatefulWidget {
   const UserDashboard({super.key});
@@ -131,11 +132,24 @@ class _UserDashboardState extends State<UserDashboard> {
         backgroundColor: const Color(0xFF2C7A2C),
         elevation: 0,
         actions: [
+          // Notifications Button
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              );
+            },
+            tooltip: "Notifications",
+          ),
+          // Refresh Button
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _fetchReports,
             tooltip: "Refresh",
           ),
+          // Profile Button
           IconButton(
             icon: const Icon(Icons.person),
             onPressed: () {
@@ -146,6 +160,7 @@ class _UserDashboardState extends State<UserDashboard> {
             },
             tooltip: "Profile",
           ),
+          // Logout Button
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,

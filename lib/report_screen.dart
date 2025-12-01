@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
-import 'services/auth_service.dart';
-import 'services/location_service.dart';
-import 'services/offline_sync.dart';
+import '../services/auth_service.dart';
+import '../services/location_service.dart';
+import '../services/offline_sync.dart';
+import '../services/notification_service.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
 
@@ -118,6 +119,9 @@ class _ReportScreenState extends State<ReportScreen> {
       _lng = pos.longitude;
     });
 
+    // Save user location for notifications
+    await NotificationService.saveUserLocation(pos.latitude, pos.longitude);
+
     _mapController.move(latlng.LatLng(_lat!, _lng!), 15);
   }
 
@@ -132,7 +136,7 @@ class _ReportScreenState extends State<ReportScreen> {
     if (_lat == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("⚠ Please enable location first."),
+          content: Text("⚠️ Please enable location first."),
           backgroundColor: Colors.orange,
         ),
       );
@@ -265,7 +269,7 @@ class _ReportScreenState extends State<ReportScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("📴 Offline: Report saved & will sync when online."),
+          content: Text("🔴 Offline: Report saved & will sync when online."),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 4),
         ),
