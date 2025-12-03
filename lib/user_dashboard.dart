@@ -138,7 +138,7 @@ class _UserDashboardState extends State<UserDashboard> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                MaterialPageRoute(builder: (_) => NotificationsScreen()),
               );
             },
             tooltip: "Notifications",
