@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'services/notification_service.dart';
+import '../services/notification_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -348,6 +348,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               _detailRow('Location', notification['location']),
               _detailRow('Severity', notification['severity']),
               _detailRow('Date', notification['date']),
+              if (notification['distance_km'] != null)
+                _detailRow('Distance', 
+                  '${notification['distance_km'].toStringAsFixed(1)} km away'),
             ],
           ),
         ),
@@ -489,6 +492,7 @@ class _NotificationSettingsScreenState
           // Severity Preferences
           _buildCard(
             title: 'Alert Severity Levels',
+            subtitle: 'Choose which severity levels to receive',
             children: [
               _buildCheckbox(
                 'Critical',
@@ -525,34 +529,235 @@ class _NotificationSettingsScreenState
 
           const SizedBox(height: 16),
 
-          // Location Filters
+          // Location Filter Type
           _buildCard(
-            title: 'Location Filters',
+            title: 'Location Filter',
+            subtitle: 'Choose how to filter notifications by location',
             children: [
               RadioListTile(
-                title: const Text('Same Municipality (Recommended)'),
+                title: const Text('Distance-Based (GPS)'),
+                subtitle: const Text('Get alerts within a specific radius'),
+                value: 'distance',
+                groupValue: _getLocationFilterType(),
+                activeColor: const Color(0xFF2C7A2C),
+                onChanged: (value) {
+                  setState(() {
+                    _settings['use_distance_filter'] = true;
+                    _settings['same_municipality_only'] = false;
+                    _settings['same_province_only'] = false;
+                  });
+                },
+              ),
+              RadioListTile(
+                title: const Text('Same Municipality'),
                 subtitle: const Text('Get alerts from your municipality'),
                 value: 'municipality',
-                groupValue: _getLocationFilter(),
+                groupValue: _getLocationFilterType(),
                 activeColor: const Color(0xFF2C7A2C),
-                onChanged: (value) => _setLocationFilter('municipality'),
+                onChanged: (value) {
+                  setState(() {
+                    _settings['use_distance_filter'] = false;
+                    _settings['same_municipality_only'] = true;
+                    _settings['same_province_only'] = false;
+                  });
+                },
               ),
               RadioListTile(
                 title: const Text('Same Province'),
                 subtitle: const Text('Get alerts from entire province'),
                 value: 'province',
-                groupValue: _getLocationFilter(),
+                groupValue: _getLocationFilterType(),
                 activeColor: const Color(0xFF2C7A2C),
-                onChanged: (value) => _setLocationFilter('province'),
+                onChanged: (value) {
+                  setState(() {
+                    _settings['use_distance_filter'] = false;
+                    _settings['same_municipality_only'] = false;
+                    _settings['same_province_only'] = true;
+                  });
+                },
               ),
             ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Distance Settings (only show if distance-based is selected)
+          if (_settings['use_distance_filter'] == true)
+            _buildCard(
+              title: 'Distance Settings',
+              subtitle: 'Set how far you want to be notified',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Maximum Distance',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            '${(_settings['max_distance_km'] ?? 10.0).toStringAsFixed(0)} km',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF2C7A2C),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: _settings['max_distance_km'] ?? 10.0,
+                        min: 1,
+                        max: 50,
+                        divisions: 49,
+                        activeColor: const Color(0xFF2C7A2C),
+                        label: '${(_settings['max_distance_km'] ?? 10.0).toStringAsFixed(0)} km',
+                        onChanged: (value) {
+                          setState(() => _settings['max_distance_km'] = value);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'You will receive notifications for infestations within ${(_settings['max_distance_km'] ?? 10.0).toStringAsFixed(0)} kilometers of your location.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+          const SizedBox(height: 16),
+
+          // Polling Interval
+          _buildCard(
+            title: 'Check Frequency',
+            subtitle: 'How often to check for new reports',
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Check every',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Text(
+                          '${_settings['polling_interval_minutes'] ?? 5} minutes',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF2C7A2C),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(value: 5, label: Text('5 min')),
+                        ButtonSegment(value: 15, label: Text('15 min')),
+                        ButtonSegment(value: 30, label: Text('30 min')),
+                        ButtonSegment(value: 60, label: Text('1 hour')),
+                      ],
+                      selected: {_settings['polling_interval_minutes'] ?? 5},
+                      onSelectionChanged: (Set<int> selected) {
+                        setState(() {
+                          _settings['polling_interval_minutes'] = selected.first;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, 
+                            size: 20, 
+                            color: Colors.blue.shade700,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'More frequent checks = faster notifications but higher battery usage',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Info card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb_outline, 
+                  color: Colors.green.shade700,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Location permissions must be enabled for distance-based notifications to work.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.green.shade700,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCard({String? title, Widget? child, List<Widget>? children}) {
+  Widget _buildCard({
+    String? title,
+    String? subtitle,
+    Widget? child,
+    List<Widget>? children,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -570,14 +775,29 @@ class _NotificationSettingsScreenState
         children: [
           if (title != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF2C7A2C),
-                ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2C7A2C),
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           if (child != null) child,
@@ -588,7 +808,11 @@ class _NotificationSettingsScreenState
   }
 
   Widget _buildCheckbox(
-      String label, bool value, Function(bool) onChanged, Color color) {
+    String label,
+    bool value,
+    Function(bool) onChanged,
+    Color color,
+  ) {
     return CheckboxListTile(
       title: Row(
         children: [
@@ -610,16 +834,10 @@ class _NotificationSettingsScreenState
     );
   }
 
-  String _getLocationFilter() {
+  String _getLocationFilterType() {
+    if (_settings['use_distance_filter'] == true) return 'distance';
     if (_settings['same_municipality_only'] == true) return 'municipality';
     if (_settings['same_province_only'] == true) return 'province';
-    return 'municipality';
-  }
-
-  void _setLocationFilter(String filter) {
-    setState(() {
-      _settings['same_municipality_only'] = filter == 'municipality';
-      _settings['same_province_only'] = filter == 'province';
-    });
+    return 'distance';
   }
 }
