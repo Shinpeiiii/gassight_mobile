@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
@@ -18,9 +19,6 @@ class NotificationService {
   static const String _userLatKey = 'user_lat';
   static const String _userLngKey = 'user_lng';
 
-  /// ==================================================
-  /// INITIALIZE LOCAL NOTIFICATIONS
-  /// ==================================================
   static Future<void> initialize() async {
     if (_initialized) return;
 
@@ -35,9 +33,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// SAVE USER LOCATION FOR DISTANCE CALCULATIONS
-  /// ==================================================
   static Future<void> saveUserLocation(double lat, double lng) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_userLatKey, lat);
@@ -45,9 +40,6 @@ class NotificationService {
     print('📍 User location saved: $lat, $lng');
   }
 
-  /// ==================================================
-  /// GET USER LOCATION
-  /// ==================================================
   static Future<Map<String, double>?> getUserLocation() async {
     final prefs = await SharedPreferences.getInstance();
     final lat = prefs.getDouble(_userLatKey);
@@ -58,45 +50,27 @@ class NotificationService {
     return {'lat': lat, 'lng': lng};
   }
 
-  /// ==================================================
-  /// CALCULATE DISTANCE BETWEEN TWO POINTS (HAVERSINE)
-  /// Returns distance in kilometers
-  /// ==================================================
   static double calculateDistance(
     double lat1, double lon1, double lat2, double lon2) {
-    const double earthRadius = 6371; // Radius of earth in kilometers
+    const double earthRadius = 6371;
     
     final dLat = _toRadians(lat2 - lat1);
     final dLon = _toRadians(lon2 - lon1);
     
-    final a = (sin(dLat / 2) * sin(dLat / 2)) +
-        cos(_toRadians(lat1)) *
-            cos(_toRadians(lat2)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
+    final a = (math.sin(dLat / 2) * math.sin(dLat / 2)) +
+        math.cos(_toRadians(lat1)) *
+            math.cos(_toRadians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
     
-    final c = 2 * asin(sqrt(a));
+    final c = 2 * math.asin(math.sqrt(a));
     return earthRadius * c;
   }
 
   static double _toRadians(double degree) {
-    return degree * (3.141592653589793 / 180);
+    return degree * (math.pi / 180);
   }
 
-  static double sin(double x) {
-    // Taylor series approximation for sin
-    double result = x;
-    double term = x;
-    for (int i = 1; i <= 10; i++) {
-      term *= -x * x / ((2 * i) * (2 * i + 1));
-      result += term;
-    }
-    return result;
-  }
-
-  /// ==================================================
-  /// REQUEST PERMISSION
-  /// ==================================================
   static Future<void> _requestPermission() async {
     final androidPlugin =
         _localNotifications.resolvePlatformSpecificImplementation<
@@ -118,9 +92,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// INITIALIZE LOCAL NOTIFICATIONS
-  /// ==================================================
   static Future<void> _initializeLocalNotifications() async {
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -143,14 +114,10 @@ class NotificationService {
     );
   }
 
-  /// ==================================================
-  /// START POLLING FOR NEW NOTIFICATIONS
-  /// ==================================================
   static void startPolling() {
     stopPolling();
     checkForNewNotifications();
 
-    // Configurable polling interval from settings
     _pollingTimer = Timer.periodic(
       const Duration(minutes: 5),
       (timer) => checkForNewNotifications(),
@@ -159,17 +126,11 @@ class NotificationService {
     print('📡 Notification polling started (every 5 minutes)');
   }
 
-  /// ==================================================
-  /// STOP POLLING
-  /// ==================================================
   static void stopPolling() {
     _pollingTimer?.cancel();
     _pollingTimer = null;
   }
 
-  /// ==================================================
-  /// CHECK FOR NEW NOTIFICATIONS (ENHANCED WITH DISTANCE)
-  /// ==================================================
   static Future<void> checkForNewNotifications() async {
     try {
       final isLoggedIn = await AuthService.isLoggedIn();
@@ -199,12 +160,9 @@ class NotificationService {
 
       print('🔍 Checking for new reports in $userMunicipality, $userProvince');
 
-      // Build query based on settings
       String query = '';
       
-      // If distance-based filtering is enabled and user has GPS location
       if (settings['use_distance_filter'] == true && userLocation != null) {
-        // Fetch all reports in province and filter by distance
         query = 'province=$userProvince';
       } else if (settings['same_municipality_only'] == true) {
         query = 'province=$userProvince&municipality=$userMunicipality';
@@ -223,7 +181,6 @@ class NotificationService {
 
       List<dynamic> reports = jsonDecode(response.body);
       
-      // Apply distance filter if enabled
       if (settings['use_distance_filter'] == true && userLocation != null) {
         final maxDistance = settings['max_distance_km'] ?? 10.0;
         reports = reports.where((report) {
@@ -242,7 +199,6 @@ class NotificationService {
         print('📍 Filtered to ${reports.length} reports within $maxDistance km');
       }
       
-      // Filter reports that are new since last check
       final DateTime lastCheckTime = lastCheck != null
           ? DateTime.parse(lastCheck)
           : DateTime.now().subtract(const Duration(hours: 1));
@@ -252,7 +208,6 @@ class NotificationService {
           final reportDate = DateTime.parse(report['date']);
           final isNew = reportDate.isAfter(lastCheckTime);
           
-          // Filter by severity settings
           final severity = report['severity']?.toString().toLowerCase() ?? '';
           if (severity == 'critical' && settings['notify_critical'] != true) return false;
           if (severity == 'high' && settings['notify_high'] != true) return false;
@@ -268,10 +223,8 @@ class NotificationService {
 
       print('🔬 Found ${newReports.length} new reports');
 
-      // Show notifications for new reports
       int notificationCount = 0;
       for (final report in newReports) {
-        // Calculate distance if user location is available
         double? distance;
         if (userLocation != null && report['lat'] != null && report['lng'] != null) {
           distance = calculateDistance(
@@ -298,9 +251,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// SHOW REPORT NOTIFICATION (WITH DISTANCE INFO)
-  /// ==================================================
   static Future<void> _showReportNotification(
     Map<String, dynamic> report,
     double? distance,
@@ -312,7 +262,6 @@ class NotificationService {
     String title = '⚠️ $severity Alert Nearby!';
     String body = 'New $type infestation reported in $location';
     
-    // Add distance information if available
     if (distance != null) {
       if (distance < 1) {
         body += ' (${(distance * 1000).toStringAsFixed(0)}m away)';
@@ -336,9 +285,6 @@ class NotificationService {
     );
   }
 
-  /// ==================================================
-  /// SHOW LOCAL NOTIFICATION
-  /// ==================================================
   static Future<void> _showLocalNotification({
     required String title,
     required String body,
@@ -378,9 +324,6 @@ class NotificationService {
     );
   }
 
-  /// ==================================================
-  /// GET IMPORTANCE FROM SEVERITY
-  /// ==================================================
   static Importance _getImportanceFromSeverity(String severity) {
     switch (severity.toLowerCase()) {
       case 'critical':
@@ -396,9 +339,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// ON NOTIFICATION TAPPED
-  /// ==================================================
   static void _onNotificationTapped(NotificationResponse response) {
     print('📱 Notification tapped: ${response.payload}');
 
@@ -415,9 +355,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// GET STORED NOTIFICATIONS
-  /// ==================================================
   static Future<List<Map<String, dynamic>>> getStoredNotifications() async {
     try {
       final profile = await AuthService.getUserProfile();
@@ -442,7 +379,6 @@ class NotificationService {
 
       List<dynamic> reports = jsonDecode(response.body);
       
-      // Apply distance filter if enabled
       if (settings['use_distance_filter'] == true && userLocation != null) {
         final maxDistance = settings['max_distance_km'] ?? 10.0;
         reports = reports.where((report) {
@@ -459,7 +395,6 @@ class NotificationService {
         }).toList();
       }
       
-      // Convert reports to notification format
       final notifications = reports.take(50).map((report) {
         double? distance;
         if (userLocation != null && report['lat'] != null && report['lng'] != null) {
@@ -501,9 +436,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// FILTER NOTIFICATIONS BY SETTINGS
-  /// ==================================================
   static Future<List<Map<String, dynamic>>> filterNotificationsBySettings(
     List<Map<String, dynamic>> notifications,
   ) async {
@@ -522,9 +454,6 @@ class NotificationService {
     }).toList();
   }
 
-  /// ==================================================
-  /// GET/CLEAR/MARK NOTIFICATION COUNTS
-  /// ==================================================
   static Future<int> getUnreadCount() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_notificationCountKey) ?? 0;
@@ -543,9 +472,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// TEST NOTIFICATION
-  /// ==================================================
   static Future<void> showTestNotification() async {
     await _showLocalNotification(
       title: '🧪 Test Notification',
@@ -554,9 +480,6 @@ class NotificationService {
     );
   }
 
-  /// ==================================================
-  /// UTILITY FUNCTIONS
-  /// ==================================================
   static Color getSeverityColor(String severity) {
     switch (severity.toLowerCase()) {
       case 'critical':
@@ -591,9 +514,6 @@ class NotificationService {
     }
   }
 
-  /// ==================================================
-  /// NOTIFICATION SETTINGS
-  /// ==================================================
   static Future<Map<String, dynamic>> getSettings() async {
     final prefs = await SharedPreferences.getInstance();
     
