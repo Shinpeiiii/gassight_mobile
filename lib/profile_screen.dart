@@ -29,20 +29,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      // Get token
+      // First, try to get locally stored profile
+      final localProfile = await AuthService.getUserProfile();
+      
+      if (localProfile['username'] != null) {
+        // Use local data immediately
+        setState(() {
+          _profile = localProfile;
+          _loading = false;
+        });
+        print("✅ Loaded profile from local storage");
+      }
+
+      // Then try to fetch fresh data from API
       final token = await AuthService.getValidAccessToken();
       
       if (token == null) {
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _error = "Not logged in";
-          });
+        // If no token and no local profile, show error
+        if (localProfile['username'] == null) {
+          if (mounted) {
+            setState(() {
+              _loading = false;
+              _error = "Not logged in";
+            });
+          }
         }
         return;
       }
 
-      print("🔑 Token obtained, fetching profile...");
+      print("🔑 Token obtained, fetching fresh profile...");
 
       // Fetch profile from API
       final response = await http.get(
@@ -54,7 +69,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ).timeout(const Duration(seconds: 10));
 
       print("📡 API Response Status: ${response.statusCode}");
-      print("📡 API Response Body: ${response.body}");
 
       if (!mounted) return;
 
@@ -74,7 +88,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _loading = false;
         });
 
-        print("✅ Profile loaded: $_profile");
+        print("✅ Profile updated from API: $_profile");
+      } else if (localProfile['username'] != null) {
+        // If API fails but we have local data, keep using it
+        print("⚠️ API returned ${response.statusCode}, using local profile");
+        setState(() {
+          _loading = false;
+        });
       } else {
         setState(() {
           _loading = false;
@@ -83,11 +103,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       print("❌ Error loading profile: $e");
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = "Error: $e";
-        });
+      
+      // If we already have local profile data, keep using it
+      if (_profile['username'] != null) {
+        print("⚠️ Using cached profile data due to network error");
+        if (mounted) {
+          setState(() {
+            _loading = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = "Network error. Please try again.";
+          });
+        }
       }
     }
   }
