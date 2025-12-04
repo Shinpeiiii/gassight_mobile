@@ -1,27 +1,29 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-def localProperties = new Properties()
-def localPropertiesFile = rootProject.file('local.properties')
+// --- Load local.properties ---
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+
 if (localPropertiesFile.exists()) {
-    localPropertiesFile.withReader('UTF-8') { reader ->
-        localProperties.load(reader)
+    FileInputStream(localPropertiesFile).use { stream ->
+        localProperties.load(stream)
     }
 }
 
-def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
-if (flutterVersionCode == null) {
-    flutterVersionCode = '1'
-}
+val flutterVersionCode: Int =
+    localProperties.getProperty("flutter.versionCode")?.toIntOrNull() ?: 1
 
-def flutterVersionName = localProperties.getProperty('flutter.versionName')
-if (flutterVersionName == null) {
-    flutterVersionName = '1.0'
-}
+val flutterVersionName: String =
+    localProperties.getProperty("flutter.versionName") ?: "1.0"
 
+// --- Android Configuration ---
 android {
     namespace = "com.example.gassight_mobile"
     compileSdk = flutter.compileSdkVersion
@@ -33,24 +35,22 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = "1.8"
     }
 
-    sourceSets {
-        main.java.srcDirs += 'src/main/kotlin'
-    }
+    sourceSets["main"].java.srcDirs("src/main/kotlin")
 
     defaultConfig {
         applicationId = "com.example.gassight_mobile"
-        minSdk = 21
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutterVersionCode.toInteger()
+        versionCode = flutterVersionCode
         versionName = flutterVersionName
     }
 
     buildTypes {
-        release {
-            signingConfig = signingConfigs.debug
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
@@ -59,4 +59,6 @@ flutter {
     source = "../.."
 }
 
-dependencies {}
+dependencies {
+    // keep empty unless you add libs
+}
