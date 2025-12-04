@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 
@@ -20,25 +21,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _debugAndLoadProfile();
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> _debugAndLoadProfile() async {
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      print("=" * 50);
-      print("🔍 STARTING PROFILE LOAD");
-      print("=" * 50);
+      print("\n" + "=" * 60);
+      print("🔍 PROFILE DEBUG - CHECKING ALL STORAGE");
+      print("=" * 60);
 
-      // Get token
-      final token = await AuthService.getValidAccessToken();
+      // Check SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final allKeys = prefs.getKeys();
+      print("📦 SharedPreferences keys: $allKeys");
       
-      if (token == null) {
-        print("❌ No valid token found");
+      final prefsToken = prefs.getString('jwt_token');
+      final prefsUsername = prefs.getString('username');
+      print("📦 Token in prefs: ${prefsToken != null ? '${prefsToken.substring(0, 20)}...' : 'NULL'}");
+      print("📦 Username in prefs: $prefsUsername");
+
+      // Check Secure Storage
+      const secureStorage = FlutterSecureStorage();
+      String? secureToken;
+      try {
+        secureToken = await secureStorage.read(key: 'jwt_token');
+        print("🔐 Token in secure storage: ${secureToken != null ? '${secureToken.substring(0, 20)}...' : 'NULL'}");
+      } catch (e) {
+        print("⚠️ Secure storage error: $e");
+      }
+
+      // Determine which token to use
+      final token = secureToken ?? prefsToken;
+
+      if (token == null || token.isEmpty) {
+        print("❌ NO TOKEN FOUND IN EITHER STORAGE!");
+        print("=" * 60 + "\n");
+        
         if (mounted) {
           setState(() {
             _loading = false;
@@ -48,53 +71,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      print("✅ Token found: ${token.substring(0, 20)}...");
+      print("✅ Using token: ${token.substring(0, 30)}...");
+      print("\n📡 Attempting API call...");
 
-      // Try to fetch from API
-      print("📡 Fetching profile from API...");
-      
+      // Make API request
       final response = await http.get(
-        Uri.parse('${AuthService.baseUrl}/api/profile'),
+        Uri.parse('https://gassight.onrender.com/api/profile'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 20));
 
-      print("📡 Response Status: ${response.statusCode}");
-      print("📡 Response Body: ${response.body}");
+      print("📡 Status: ${response.statusCode}");
+      print("📡 Body: ${response.body}");
+      print("=" * 60 + "\n");
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print("✅ Parsed response data: $data");
 
-        // Try multiple field name variations
+        // Extract all possible field variations
         final username = data['username']?.toString() ?? '';
         final fullName = data['full_name']?.toString() ?? 
-                        data['fullName']?.toString() ?? 
-                        data['name']?.toString() ?? '';
+                        data['fullName']?.toString() ?? '';
         final email = data['email']?.toString() ?? '';
         final phone = data['phone']?.toString() ?? 
-                     data['contact']?.toString() ?? 
-                     data['phoneNumber']?.toString() ?? '';
+                     data['contact']?.toString() ?? '';
         final province = data['province']?.toString() ?? '';
-        final municipality = data['municipality']?.toString() ?? 
-                           data['city']?.toString() ?? '';
+        final municipality = data['municipality']?.toString() ?? '';
         final barangay = data['barangay']?.toString() ?? '';
 
-        print("📝 Extracted data:");
-        print("   Username: $username");
-        print("   Full Name: $fullName");
-        print("   Email: $email");
-        print("   Phone: $phone");
-        print("   Province: $province");
-        print("   Municipality: $municipality");
-        print("   Barangay: $barangay");
-
-        // Save to local storage
-        final prefs = await SharedPreferences.getInstance();
+        print("💾 Saving profile data...");
+        
+        // Save to SharedPreferences
         await prefs.setString('username', username);
         await prefs.setString('full_name', fullName);
         await prefs.setString('email', email);
@@ -102,8 +113,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await prefs.setString('province', province);
         await prefs.setString('municipality', municipality);
         await prefs.setString('barangay', barangay);
-        
-        print("💾 Saved to local storage");
+
+        print("✅ Profile saved!");
 
         setState(() {
           _profile = {
@@ -117,29 +128,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           };
           _loading = false;
         });
-
-        print("✅ Profile loaded successfully!");
-        print("=" * 50);
       } else if (response.statusCode == 401) {
-        // Token expired or invalid
-        print("❌ Unauthorized - token may be expired");
-        setState(() {
-          _loading = false;
-          _error = "Session expired. Please log in again.";
-        });
+        print("❌ Token expired or invalid");
         
-        // Show dialog before logging out
+        // Clear all storage
+        await prefs.clear();
+        await secureStorage.deleteAll();
+        
         if (mounted) {
-          await showDialog(
+          showDialog(
             context: context,
+            barrierDismissible: false,
             builder: (context) => AlertDialog(
               title: const Text("Session Expired"),
-              content: const Text("Your session has expired. Please log in again."),
+              content: const Text("Please log in again."),
               actions: [
                 TextButton(
                   onPressed: () {
-                    Navigator.pop(context);
-                    AuthService.logout();
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -153,18 +158,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
       } else {
-        print("❌ API Error: ${response.statusCode}");
         setState(() {
           _loading = false;
-          _error = "Failed to load profile. Status: ${response.statusCode}\n\nPlease try refreshing or log in again.";
+          _error = "Server error: ${response.statusCode}";
         });
       }
     } catch (e) {
-      print("❌ Exception loading profile: $e");
+      print("❌ ERROR: $e");
+      print("=" * 60 + "\n");
+      
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = "Network error: $e\n\nPlease check your connection and try again.";
+          _error = "Error: $e";
         });
       }
     }
@@ -192,7 +198,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (confirm != true) return;
 
-    await AuthService.logout();
+    // Clear everything
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    
+    const secureStorage = FlutterSecureStorage();
+    await secureStorage.deleteAll();
+
     if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
@@ -213,7 +225,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadProfile,
+            onPressed: _debugAndLoadProfile,
             tooltip: "Refresh",
           ),
           IconButton(
@@ -233,7 +245,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text("Loading profile..."),
                   SizedBox(height: 8),
                   Text(
-                    "This may take a few seconds",
+                    "Please wait...",
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -254,11 +266,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Text(
                           _error!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.red),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Check console logs for details",
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton.icon(
-                          onPressed: _loadProfile,
+                          onPressed: _debugAndLoadProfile,
                           icon: const Icon(Icons.refresh),
                           label: const Text("Retry"),
                           style: ElevatedButton.styleFrom(
@@ -273,7 +293,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         OutlinedButton.icon(
                           onPressed: _logout,
                           icon: const Icon(Icons.logout),
-                          label: const Text("Log Out"),
+                          label: const Text("Log Out & Start Fresh"),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.red,
                             side: const BorderSide(color: Colors.red),
@@ -299,7 +319,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return SingleChildScrollView(
       child: Column(
         children: [
-          // Header with gradient background
           Container(
             width: double.infinity,
             decoration: const BoxDecoration(
@@ -312,7 +331,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
             child: Column(
               children: [
-                // Avatar with initial
                 Container(
                   width: 100,
                   height: 100,
@@ -339,7 +357,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Name
                 Text(
                   name,
                   style: const TextStyle(
@@ -350,7 +367,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 4),
-                // Username
                 Text(
                   "@$username",
                   style: TextStyle(
@@ -361,33 +377,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
-
-          // Profile Information Cards
           Padding(
             padding: const EdgeInsets.all(18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Account Information Section
                 _sectionHeader("Account Information", Icons.person),
                 const SizedBox(height: 12),
                 _infoCard("Username", p["username"], Icons.account_circle),
                 _infoCard("Full Name", p["full_name"], Icons.badge),
                 _infoCard("Email", p["email"], Icons.email),
                 _infoCard("Phone", p["phone"], Icons.phone),
-
                 const SizedBox(height: 24),
-
-                // Location Information Section
                 _sectionHeader("Location Information", Icons.location_on),
                 const SizedBox(height: 12),
                 _infoCard("Province", p["province"], Icons.map),
                 _infoCard("Municipality", p["municipality"], Icons.location_city),
                 _infoCard("Barangay", p["barangay"], Icons.home),
-
                 const SizedBox(height: 30),
-
-                // Action Buttons
                 Row(
                   children: [
                     Expanded(
@@ -475,11 +482,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               color: const Color(0xFF2C7A2C).withOpacity(0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
-              icon,
-              color: const Color(0xFF2C7A2C),
-              size: 20,
-            ),
+            child: Icon(icon, color: const Color(0xFF2C7A2C), size: 20),
           ),
           const SizedBox(width: 16),
           Expanded(
