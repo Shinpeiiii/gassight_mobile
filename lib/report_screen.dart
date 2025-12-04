@@ -8,8 +8,10 @@ import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/offline_sync.dart';
 import '../services/notification_service.dart';
+import '../services/philippines_locations.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
+import 'notifications_screen.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as latlng;
@@ -24,12 +26,19 @@ class ReportScreen extends StatefulWidget {
 class _ReportScreenState extends State<ReportScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _province = TextEditingController();
-  final _municipality = TextEditingController();
-  final _barangay = TextEditingController();
   final _description = TextEditingController();
 
   String _infestationType = 'Golden Apple Snail (GAS)';
+
+  // Location dropdowns
+  String? _selectedProvince;
+  String? _selectedMunicipality;
+  String? _selectedBarangay;
+
+  List<String> _provinces = [];
+  List<String> _municipalities = [];
+  List<String> _barangays = [];
+  bool _loadingLocations = true;
 
   final List<String> infestationTypes = [
     'Golden Apple Snail (GAS)',
@@ -45,6 +54,7 @@ class _ReportScreenState extends State<ReportScreen> {
 
   String? _username;
   String? _fullName;
+  int _unreadCount = 0;
 
   late OfflineSyncManager _offline;
   final MapController _mapController = MapController();
@@ -59,8 +69,75 @@ class _ReportScreenState extends State<ReportScreen> {
   Future<void> _initAll() async {
     await _offline.init();
     await _offline.syncReports();
+    await _loadProvinces();
     await _loadProfile();
     await _getLocation();
+    await _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    final count = await NotificationService.getUnreadCount();
+    if (mounted) {
+      setState(() => _unreadCount = count);
+    }
+  }
+
+  Future<void> _loadProvinces() async {
+    setState(() => _loadingLocations = true);
+    
+    final provinces = await PhilippinesLocations.getProvinces();
+    
+    if (!mounted) return;
+    
+    setState(() {
+      _provinces = provinces;
+      _loadingLocations = false;
+    });
+  }
+
+  Future<void> _onProvinceChanged(String? province) async {
+    if (province == null) return;
+
+    setState(() {
+      _selectedProvince = province;
+      _selectedMunicipality = null;
+      _selectedBarangay = null;
+      _municipalities = [];
+      _barangays = [];
+      _loadingLocations = true;
+    });
+
+    final municipalities = await PhilippinesLocations.getMunicipalities(province);
+
+    if (!mounted) return;
+
+    setState(() {
+      _municipalities = municipalities;
+      _loadingLocations = false;
+    });
+  }
+
+  Future<void> _onMunicipalityChanged(String? municipality) async {
+    if (municipality == null || _selectedProvince == null) return;
+
+    setState(() {
+      _selectedMunicipality = municipality;
+      _selectedBarangay = null;
+      _barangays = [];
+      _loadingLocations = true;
+    });
+
+    final barangays = await PhilippinesLocations.getBarangays(
+      _selectedProvince!,
+      municipality,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _barangays = barangays;
+      _loadingLocations = false;
+    });
   }
 
   Future<void> _loadProfile() async {
@@ -71,9 +148,24 @@ class _ReportScreenState extends State<ReportScreen> {
       _username = profile["username"];
       _fullName = profile["full_name"];
 
-      _province.text = profile["province"] ?? "";
-      _municipality.text = profile["municipality"] ?? "";
-      _barangay.text = profile["barangay"] ?? "";
+      // Pre-select user's location
+      final userProvince = profile["province"];
+      final userMunicipality = profile["municipality"];
+      final userBarangay = profile["barangay"];
+
+      if (userProvince != null && userProvince.isNotEmpty) {
+        _selectedProvince = userProvince;
+        _onProvinceChanged(userProvince).then((_) {
+          if (userMunicipality != null && userMunicipality.isNotEmpty) {
+            setState(() => _selectedMunicipality = userMunicipality);
+            _onMunicipalityChanged(userMunicipality).then((_) {
+              if (userBarangay != null && userBarangay.isNotEmpty) {
+                setState(() => _selectedBarangay = userBarangay);
+              }
+            });
+          }
+        });
+      }
     });
   }
 
@@ -119,9 +211,7 @@ class _ReportScreenState extends State<ReportScreen> {
       _lng = pos.longitude;
     });
 
-    // Save user location for notifications
     await NotificationService.saveUserLocation(pos.latitude, pos.longitude);
-
     _mapController.move(latlng.LatLng(_lat!, _lng!), 15);
   }
 
@@ -133,6 +223,27 @@ class _ReportScreenState extends State<ReportScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_selectedProvince == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Please select a province")),
+      );
+      return;
+    }
+
+    if (_selectedMunicipality == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Please select a municipality")),
+      );
+      return;
+    }
+
+    if (_selectedBarangay == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Please select a barangay")),
+      );
+      return;
+    }
+
     if (_lat == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -143,7 +254,6 @@ class _ReportScreenState extends State<ReportScreen> {
       return;
     }
 
-    // Show confirmation dialog
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -179,9 +289,9 @@ class _ReportScreenState extends State<ReportScreen> {
 
     final report = {
       "reporter": _username,
-      "province": _province.text.trim(),
-      "municipality": _municipality.text.trim(),
-      "barangay": _barangay.text.trim(),
+      "province": _selectedProvince,
+      "municipality": _selectedMunicipality,
+      "barangay": _selectedBarangay,
       "infestation_type": _infestationType,
       "description": _description.text.trim(),
       "lat": _lat,
@@ -247,14 +357,12 @@ class _ReportScreenState extends State<ReportScreen> {
           ),
         );
         
-        // Reset form
         _formKey.currentState!.reset();
         setState(() {
           _image = null;
           _description.clear();
         });
         
-        // Reload location data
         await _loadProfile();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -288,7 +396,49 @@ class _ReportScreenState extends State<ReportScreen> {
         backgroundColor: const Color(0xFF2C7A2C),
         elevation: 0,
         actions: [
-          // Profile Button
+          // Notifications Button with Badge
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  );
+                  _loadUnreadCount();
+                },
+                tooltip: "Notifications",
+              ),
+              if (_unreadCount > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 18,
+                      minHeight: 18,
+                    ),
+                    child: Text(
+                      _unreadCount > 99 ? '99+' : '$_unreadCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.person),
             onPressed: () {
@@ -299,7 +449,6 @@ class _ReportScreenState extends State<ReportScreen> {
             },
             tooltip: "Profile",
           ),
-          // Logout Button
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
@@ -319,28 +468,49 @@ class _ReportScreenState extends State<ReportScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // User Info Card
             if (_username != null) _userInfoCard(),
-
             const SizedBox(height: 20),
 
-            // Location Fields
             _sectionTitle("Location Information", Icons.location_on),
             const SizedBox(height: 12),
-            _textField(_province, "Province", Icons.map),
-            _textField(_municipality, "Municipality", Icons.location_city),
-            _textField(_barangay, "Barangay", Icons.home),
+            
+            // Province Dropdown
+            _locationDropdown(
+              label: "Province",
+              value: _selectedProvince,
+              items: _provinces,
+              onChanged: _onProvinceChanged,
+              icon: Icons.map,
+            ),
+
+            // Municipality Dropdown
+            _locationDropdown(
+              label: "Municipality / City",
+              value: _selectedMunicipality,
+              items: _municipalities,
+              onChanged: _onMunicipalityChanged,
+              icon: Icons.location_city,
+              enabled: _selectedProvince != null,
+            ),
+
+            // Barangay Dropdown
+            _locationDropdown(
+              label: "Barangay",
+              value: _selectedBarangay,
+              items: _barangays,
+              onChanged: (value) => setState(() => _selectedBarangay = value),
+              icon: Icons.home,
+              enabled: _selectedMunicipality != null,
+            ),
 
             const SizedBox(height: 20),
 
-            // Infestation Type
             _sectionTitle("Infestation Details", Icons.bug_report),
             const SizedBox(height: 12),
             _infestationDropdown(),
 
             const SizedBox(height: 14),
 
-            // Description
             _textField(
               _description,
               "Description",
@@ -351,7 +521,6 @@ class _ReportScreenState extends State<ReportScreen> {
 
             const SizedBox(height: 20),
 
-            // GPS Location
             _sectionTitle("GPS Location", Icons.gps_fixed),
             const SizedBox(height: 12),
             _gpsCard(),
@@ -361,14 +530,12 @@ class _ReportScreenState extends State<ReportScreen> {
 
             const SizedBox(height: 20),
 
-            // Photo
             _sectionTitle("Photo Evidence", Icons.camera_alt),
             const SizedBox(height: 12),
             _photoPicker(),
 
             const SizedBox(height: 30),
 
-            // Submit Button
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -412,7 +579,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // User info card
   Widget _userInfoCard() {
     return Container(
       width: double.infinity,
@@ -480,7 +646,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Section title
   Widget _sectionTitle(String title, IconData icon) {
     return Row(
       children: [
@@ -498,7 +663,68 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Text field with icon
+  Widget _locationDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required Function(String?) onChanged,
+    required IconData icon,
+    bool enabled = true,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: enabled ? Colors.white : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: DropdownButtonFormField<String>(
+          value: value,
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: Icon(icon, color: const Color(0xFF2C7A2C)),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            filled: true,
+            fillColor: enabled ? Colors.white : Colors.grey.shade100,
+          ),
+          items: items.isEmpty
+              ? null
+              : items
+                  .map((item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(
+                          item,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ))
+                  .toList(),
+          onChanged: enabled ? onChanged : null,
+          validator: (v) => v == null ? "Please select $label" : null,
+          isExpanded: true,
+          hint: Text(
+            enabled
+                ? "Select $label"
+                : "Please select ${label.toLowerCase() == 'municipality / city' ? 'province' : label.toLowerCase() == 'barangay' ? 'municipality' : 'previous'} first",
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[600],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _textField(
     TextEditingController controller,
     String label,
@@ -538,7 +764,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Infestation dropdown
   Widget _infestationDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -568,7 +793,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // GPS card
   Widget _gpsCard() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -621,7 +845,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Map widget
   Widget _map() {
     return Container(
       height: 220,
@@ -685,7 +908,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Photo picker
   Widget _photoPicker() {
     return GestureDetector(
       onTap: _showImageSourceDialog,
@@ -749,7 +971,6 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 
-  // Show image source dialog
   void _showImageSourceDialog() {
     showModalBottomSheet(
       context: context,

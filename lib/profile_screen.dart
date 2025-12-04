@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 
@@ -27,42 +29,66 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      // First try to get cached profile
-      final cachedProfile = await AuthService.getUserProfile();
+      // Get token
+      final token = await AuthService.getValidAccessToken();
       
-      if (mounted) {
-        setState(() {
-          _profile = cachedProfile;
-        });
+      if (token == null) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = "Not logged in";
+          });
+        }
+        return;
       }
 
-      // Then refresh from server
-      final refreshed = await AuthService.refreshProfile();
-      
-      if (refreshed && mounted) {
-        final updatedProfile = await AuthService.getUserProfile();
+      print("🔑 Token obtained, fetching profile...");
+
+      // Fetch profile from API
+      final response = await http.get(
+        Uri.parse('${AuthService.baseUrl}/api/profile'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      print("📡 API Response Status: ${response.statusCode}");
+      print("📡 API Response Body: ${response.body}");
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        
         setState(() {
-          _profile = updatedProfile;
+          _profile = {
+            'username': data['username']?.toString(),
+            'full_name': data['full_name']?.toString() ?? data['fullName']?.toString(),
+            'email': data['email']?.toString(),
+            'phone': data['phone']?.toString() ?? data['contact']?.toString(),
+            'province': data['province']?.toString(),
+            'municipality': data['municipality']?.toString(),
+            'barangay': data['barangay']?.toString(),
+          };
           _loading = false;
         });
-      } else if (mounted) {
+
+        print("✅ Profile loaded: $_profile");
+      } else {
         setState(() {
           _loading = false;
-          // Use cached data if refresh fails
-          if (_profile.isEmpty || 
-              _profile.values.every((v) => v == null || v.isEmpty)) {
-            _error = "Could not load profile data";
-          }
+          _error = "Failed to load profile (Status: ${response.statusCode})";
         });
       }
     } catch (e) {
+      print("❌ Error loading profile: $e");
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = "Error loading profile: $e";
+          _error = "Error: $e";
         });
       }
-      print("Error in _loadProfile: $e");
     }
   }
 
@@ -140,10 +166,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         color: Colors.red,
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.red),
+                      Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.red),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       ElevatedButton.icon(
@@ -165,9 +194,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final p = _profile;
     final name = p["full_name"] ?? p["username"] ?? "User";
     final username = p["username"] ?? "N/A";
-
-    // Debug print to see what data we have
-    print("Profile data: $_profile");
 
     return SingleChildScrollView(
       child: Column(
@@ -297,7 +323,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Get initials from name
   String _getInitials(String name) {
     if (name.isEmpty || name == "User" || name == "N/A") return "?";
     final parts = name.trim().split(' ');
@@ -307,7 +332,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
-  // Section header widget
   Widget _sectionHeader(String title, IconData icon) {
     return Row(
       children: [
@@ -325,7 +349,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Info card widget with icon
   Widget _infoCard(String label, String? value, IconData icon) {
     return Container(
       width: double.infinity,
@@ -344,7 +367,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Row(
         children: [
-          // Icon
           Container(
             width: 40,
             height: 40,
@@ -359,7 +381,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(width: 16),
-          // Label and Value
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
