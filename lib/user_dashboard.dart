@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as latlng;
 
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
 import 'profile_screen.dart';
 import 'report_screen.dart';
 import 'login_screen.dart';
@@ -21,6 +22,7 @@ class _UserDashboardState extends State<UserDashboard> {
   List<dynamic> _reports = [];
   bool _loading = true;
   String? _username;
+  int _unreadCount = 0;
 
   // Filters
   String _selectedSeverity = 'All';
@@ -46,6 +48,14 @@ class _UserDashboardState extends State<UserDashboard> {
   Future<void> _init() async {
     await _loadProfile();
     await _fetchReports();
+    await _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    final count = await NotificationService.getUnreadCount();
+    if (mounted) {
+      setState(() => _unreadCount = count);
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -132,21 +142,56 @@ class _UserDashboardState extends State<UserDashboard> {
         backgroundColor: const Color(0xFF2C7A2C),
         elevation: 0,
         actions: [
-          // Notifications Button
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => NotificationsScreen()),
-              );
-            },
-            tooltip: "Notifications",
+          // Notifications Button with Badge
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  );
+                  _loadUnreadCount(); // Refresh count when returning
+                },
+                tooltip: "Notifications",
+              ),
+              if (_unreadCount > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 18,
+                      minHeight: 18,
+                    ),
+                    child: Text(
+                      _unreadCount > 99 ? '99+' : '$_unreadCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
           // Refresh Button
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _fetchReports,
+            onPressed: () {
+              _fetchReports();
+              _loadUnreadCount();
+            },
             tooltip: "Refresh",
           ),
           // Profile Button
@@ -198,7 +243,10 @@ class _UserDashboardState extends State<UserDashboard> {
 
   Widget _buildDashboard() {
     return RefreshIndicator(
-      onRefresh: _fetchReports,
+      onRefresh: () async {
+        await _fetchReports();
+        await _loadUnreadCount();
+      },
       color: const Color(0xFF2C7A2C),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -511,7 +559,7 @@ class _UserDashboardState extends State<UserDashboard> {
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 2),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.location_on,
                     color: Colors.white,
                     size: 20,

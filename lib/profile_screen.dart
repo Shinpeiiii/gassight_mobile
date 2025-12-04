@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'services/auth_service.dart';
+import '../services/auth_service.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -12,6 +12,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, String?> _profile = {};
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -20,14 +21,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
-    setState(() => _loading = true);
-    final data = await AuthService.getUserProfile();
-    if (!mounted) return;
-
     setState(() {
-      _profile = data;
-      _loading = false;
+      _loading = true;
+      _error = null;
     });
+
+    try {
+      // First try to get cached profile
+      final cachedProfile = await AuthService.getUserProfile();
+      
+      if (mounted) {
+        setState(() {
+          _profile = cachedProfile;
+        });
+      }
+
+      // Then refresh from server
+      final refreshed = await AuthService.refreshProfile();
+      
+      if (refreshed && mounted) {
+        final updatedProfile = await AuthService.getUserProfile();
+        setState(() {
+          _profile = updatedProfile;
+          _loading = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _loading = false;
+          // Use cached data if refresh fails
+          if (_profile.isEmpty || 
+              _profile.values.every((v) => v == null || v.isEmpty)) {
+            _error = "Could not load profile data";
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = "Error loading profile: $e";
+        });
+      }
+      print("Error in _loadProfile: $e");
+    }
   }
 
   Future<void> _logout() async {
@@ -84,8 +120,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildProfileContent(),
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Color(0xFF2C7A2C)),
+                  SizedBox(height: 16),
+                  Text("Loading profile..."),
+                ],
+              ),
+            )
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline, 
+                        size: 64, 
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _loadProfile,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text("Retry"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2C7A2C),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : _buildProfileContent(),
     );
   }
 
@@ -93,6 +165,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final p = _profile;
     final name = p["full_name"] ?? p["username"] ?? "User";
     final username = p["username"] ?? "N/A";
+
+    // Debug print to see what data we have
+    print("Profile data: $_profile");
 
     return SingleChildScrollView(
       child: Column(
@@ -224,7 +299,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // Get initials from name
   String _getInitials(String name) {
-    if (name.isEmpty) return "?";
+    if (name.isEmpty || name == "User" || name == "N/A") return "?";
     final parts = name.trim().split(' ');
     if (parts.length == 1) {
       return parts[0][0].toUpperCase();
@@ -299,11 +374,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  value ?? "Not provided",
+                  value != null && value.isNotEmpty ? value : "Not provided",
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: value != null ? Colors.black87 : Colors.grey[400],
+                    color: value != null && value.isNotEmpty 
+                        ? Colors.black87 
+                        : Colors.grey[400],
                   ),
                 ),
               ],
