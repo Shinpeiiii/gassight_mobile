@@ -32,36 +32,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       print("\n" + "=" * 60);
-      print("🔍 PROFILE DEBUG - CHECKING ALL STORAGE");
+      print("🔍 PROFILE DEBUG - CHECKING TOKEN SOURCE");
       print("=" * 60);
 
-      // Check SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final allKeys = prefs.getKeys();
-      print("📦 SharedPreferences keys: $allKeys");
-      
-      final prefsToken = prefs.getString('jwt_token');
-      final prefsUsername = prefs.getString('username');
-      print("📦 Token in prefs: ${prefsToken != null ? '${prefsToken.substring(0, 20)}...' : 'NULL'}");
-      print("📦 Username in prefs: $prefsUsername");
-
-      // Check Secure Storage
-      const secureStorage = FlutterSecureStorage();
-      String? secureToken;
-      try {
-        secureToken = await secureStorage.read(key: 'jwt_token');
-        print("🔐 Token in secure storage: ${secureToken != null ? '${secureToken.substring(0, 20)}...' : 'NULL'}");
-      } catch (e) {
-        print("⚠️ Secure storage error: $e");
-      }
-
-      // Determine which token to use
-      final token = secureToken ?? prefsToken;
+      // ---------------------------
+      // FIX: Use AuthService.getToken()
+      // ---------------------------
+      final token = await AuthService.getToken();
+      print("🔐 Token from AuthService: ${token != null ? token.substring(0, (token.length >= 25 ? 25 : token.length)) + '...' : 'NULL'}");
 
       if (token == null || token.isEmpty) {
-        print("❌ NO TOKEN FOUND IN EITHER STORAGE!");
-        print("=" * 60 + "\n");
-        
+        print("❌ NO TOKEN FOUND VIA AUTHSERVICE");
         if (mounted) {
           setState(() {
             _loading = false;
@@ -71,17 +52,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      print("✅ Using token: ${token.substring(0, 30)}...");
+      print("✅ Using token: ${token.substring(0, (token.length >= 25 ? 25 : token.length))}...");
       print("\n📡 Attempting API call...");
 
       // Make API request
-      final response = await http.get(
-        Uri.parse('https://gassight.onrender.com/api/profile'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 20));
+      final response = await http
+          .get(
+            Uri.parse('https://gassight.onrender.com/api/profile'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 20));
 
       print("📡 Status: ${response.statusCode}");
       print("📡 Body: ${response.body}");
@@ -94,18 +77,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         // Extract all possible field variations
         final username = data['username']?.toString() ?? '';
-        final fullName = data['full_name']?.toString() ?? 
-                        data['fullName']?.toString() ?? '';
+        final fullName = data['full_name']?.toString() ?? data['fullName']?.toString() ?? '';
         final email = data['email']?.toString() ?? '';
-        final phone = data['phone']?.toString() ?? 
-                     data['contact']?.toString() ?? '';
+        final phone = data['phone']?.toString() ?? data['contact']?.toString() ?? '';
         final province = data['province']?.toString() ?? '';
         final municipality = data['municipality']?.toString() ?? '';
         final barangay = data['barangay']?.toString() ?? '';
 
         print("💾 Saving profile data...");
-        
+
         // Save to SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
         await prefs.setString('username', username);
         await prefs.setString('full_name', fullName);
         await prefs.setString('email', email);
@@ -130,11 +112,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       } else if (response.statusCode == 401) {
         print("❌ Token expired or invalid");
-        
+
         // Clear all storage
+        final prefs = await SharedPreferences.getInstance();
         await prefs.clear();
-        await secureStorage.deleteAll();
-        
+        await const FlutterSecureStorage().deleteAll();
+
         if (mounted) {
           showDialog(
             context: context,
@@ -166,7 +149,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       print("❌ ERROR: $e");
       print("=" * 60 + "\n");
-      
+
       if (mounted) {
         setState(() {
           _loading = false;
@@ -201,9 +184,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Clear everything
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    
-    const secureStorage = FlutterSecureStorage();
-    await secureStorage.deleteAll();
+
+    await const FlutterSecureStorage().deleteAll();
 
     if (!mounted) return;
 
@@ -258,8 +240,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.error_outline, 
-                          size: 64, 
+                        const Icon(
+                          Icons.error_outline,
+                          size: 64,
                           color: Colors.red,
                         ),
                         const SizedBox(height: 16),
@@ -283,7 +266,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           label: const Text("Retry"),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2C7A2C),
-                            padding: const EdgeInsets.symmetric(
+                            padding: EdgeInsets.symmetric(
                               horizontal: 24,
                               vertical: 12,
                             ),
@@ -297,7 +280,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.red,
                             side: const BorderSide(color: Colors.red),
-                            padding: const EdgeInsets.symmetric(
+                            padding: EdgeInsets.symmetric(
                               horizontal: 24,
                               vertical: 12,
                             ),
@@ -341,7 +324,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       BoxShadow(
                         color: Colors.black.withOpacity(0.2),
                         blurRadius: 10,
-                        offset: const Offset(0, 4),
+                        offset: Offset(0, 4),
                       ),
                     ],
                   ),
@@ -503,9 +486,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: value != null && value.isNotEmpty 
-                        ? Colors.black87 
-                        : Colors.grey[400],
+                    color: value != null && value.isNotEmpty ? Colors.black87 : Colors.grey[400],
                   ),
                 ),
               ],

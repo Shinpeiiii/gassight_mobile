@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class AuthService {
   static const String baseUrl = "https://gassight.onrender.com";
 
-  // Use both secure storage and shared preferences for redundancy
+  // Secure storage
   static const _secureStorage = FlutterSecureStorage();
 
   // Storage keys
@@ -24,18 +24,10 @@ class AuthService {
   /// PASSWORD VALIDATION
   /// ==================================================
   static String? validatePasswordStrength(String password) {
-    if (password.length < 8) {
-      return "Password must be at least 8 characters";
-    }
-    if (!password.contains(RegExp(r'[A-Z]'))) {
-      return "Password must contain at least one uppercase letter";
-    }
-    if (!password.contains(RegExp(r'[a-z]'))) {
-      return "Password must contain at least one lowercase letter";
-    }
-    if (!password.contains(RegExp(r'[0-9]'))) {
-      return "Password must contain at least one number";
-    }
+    if (password.length < 8) return "Password must be at least 8 characters";
+    if (!password.contains(RegExp(r'[A-Z]'))) return "Password must contain at least one uppercase letter";
+    if (!password.contains(RegExp(r'[a-z]'))) return "Password must contain at least one lowercase letter";
+    if (!password.contains(RegExp(r'[0-9]'))) return "Password must contain at least one number";
     return null;
   }
 
@@ -44,56 +36,51 @@ class AuthService {
   /// ==================================================
   static String sanitizeInput(String? input) {
     if (input == null || input.isEmpty) return '';
-    
-    String sanitized = input
-        .replaceAll('<', '')
-        .replaceAll('>', '')
-        .replaceAll('"', '')
-        .replaceAll("'", '')
-        .replaceAll('&', '')
-        .replaceAll(';', '');
-    
-    return sanitized.trim();
+
+    return input
+        .replaceAll(RegExp(r'[<>\"\'&;]'), '')
+        .trim();
   }
 
   /// ==================================================
-  /// TOKEN STORAGE (Dual storage for reliability)
+  /// TOKEN SAVE
   /// ==================================================
   static Future<void> _saveToken(String token) async {
     try {
-      // Save to secure storage
       await _secureStorage.write(key: _tokenKey, value: token);
-      
-      // Also save to shared preferences as backup
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_tokenKey, token);
-      
-      print("✅ Token saved to both secure storage and SharedPreferences");
+
+      print("✅ Token saved to both secure storage + SharedPreferences");
     } catch (e) {
       print("❌ Error saving token: $e");
     }
   }
 
+  /// ==================================================
+  /// GET TOKEN (ALWAYS RELIABLE)
+  /// ==================================================
   static Future<String?> _getToken() async {
     try {
-      // Try secure storage first
+      // Step 1: Check secure storage
       String? token = await _secureStorage.read(key: _tokenKey);
-      
-      // If not found, try shared preferences
+
+      // Step 2: If missing, check shared prefs
       if (token == null) {
         final prefs = await SharedPreferences.getInstance();
         token = prefs.getString(_tokenKey);
-        
-        // If found in prefs, save back to secure storage
+
+        // Sync back to secure storage
         if (token != null) {
           await _secureStorage.write(key: _tokenKey, value: token);
         }
       }
-      
+
       return token;
     } catch (e) {
-      print("❌ Error getting token: $e");
-      // Fallback to shared preferences
+      print("⚠️ Secure read error: $e");
+
+      // Fallback
       final prefs = await SharedPreferences.getInstance();
       return prefs.getString(_tokenKey);
     }
@@ -104,21 +91,21 @@ class AuthService {
       await _secureStorage.delete(key: _tokenKey);
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_tokenKey);
+
+      print("🗑 Token removed");
     } catch (e) {
       print("❌ Error deleting token: $e");
     }
   }
 
   /// ==================================================
-  /// LOGIN WITH JWT
+  /// LOGIN
   /// ==================================================
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
-      print("\n" + "=" * 50);
-      print("🔐 LOGIN ATTEMPT");
-      print("=" * 50);
-      print("Username: $username");
-      
+      print("\n========== LOGIN ATTEMPT ==========");
+      print("User: $username");
+
       final response = await http.post(
         Uri.parse("$baseUrl/login"),
         headers: {
@@ -129,65 +116,42 @@ class AuthService {
           "username": sanitizeInput(username),
           "password": password,
         }),
-      ).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw Exception("Connection timeout - server took too long to respond");
-        },
-      );
+      ).timeout(const Duration(seconds: 15));
 
-      print("📡 Login Response Status: ${response.statusCode}");
-      print("📡 Login Response Body: ${response.body}");
+      print("📡 Login Status: ${response.statusCode}");
+      print("📡 Body: ${response.body}");
 
-      if (response.headers["content-type"]?.contains("application/json") != true) {
-        print("❌ Invalid response type");
-        return {
-          "ok": false,
-          "error": "Invalid server response"
-        };
-      }
-
-      Map<String, dynamic> data;
-      try {
-        data = jsonDecode(response.body);
-      } catch (e) {
-        print("❌ JSON parse error: $e");
+      if (!response.headers["content-type"]!.contains("application/json")) {
         return {"ok": false, "error": "Invalid server response"};
       }
 
+      final data = jsonDecode(response.body);
+
       if (response.statusCode == 200 && data["success"] == true) {
+        final token = data["token"];
         final prefs = await SharedPreferences.getInstance();
 
         // Save token
-        final token = data["token"];
         if (token != null && token.isNotEmpty) {
+          print("🔑 Token received: ${token.substring(0, 25)}...");
           await _saveToken(token);
-          print("✅ Token saved: ${token.substring(0, 20)}...");
         } else {
-          print("⚠️ No token in response!");
+          print("⚠️ Login success but token missing!");
         }
 
-        // Save username
+        // Save basic info
         await prefs.setString(_usernameKey, username);
         await prefs.setBool(_isAdminKey, data["is_admin"] ?? false);
-        
-        print("✅ Basic info saved");
 
-        // Try to get profile immediately
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Immediately fetch profile
         await _fetchAndStoreProfile();
 
-        print("✅ Login successful!");
-        print("=" * 50 + "\n");
-        
         return {"ok": true};
       }
 
-      print("❌ Login failed: ${data['error']}");
       return {"ok": false, "error": data["error"] ?? "Login failed"};
-      
     } catch (e) {
-      print("❌ Login exception: $e");
+      print("❌ Login error: $e");
       return {"ok": false, "error": "Network error: $e"};
     }
   }
@@ -196,19 +160,17 @@ class AuthService {
   /// SIGNUP
   /// ==================================================
   static Future<Map<String, dynamic>> signup(
-    String username,
-    String password,
-    String fullName,
-    String email,
-    String phone,
-    String province,
-    String municipality,
-    String barangay,
-  ) async {
-    final passwordError = validatePasswordStrength(password);
-    if (passwordError != null) {
-      return {"ok": false, "error": passwordError};
-    }
+      String username,
+      String password,
+      String fullName,
+      String email,
+      String phone,
+      String province,
+      String municipality,
+      String barangay) async {
+
+    final err = validatePasswordStrength(password);
+    if (err != null) return {"ok": false, "error": err};
 
     try {
       final response = await http.post(
@@ -229,33 +191,32 @@ class AuthService {
         }),
       ).timeout(const Duration(seconds: 15));
 
-      final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      final data =
+          response.body.isNotEmpty ? jsonDecode(response.body) : {};
 
       if (response.statusCode == 200) {
         return {"ok": true};
       }
 
-      return {
-        "ok": false,
-        "error": data["error"] ?? "Signup failed"
-      };
+      return {"ok": false, "error": data["error"] ?? "Signup failed"};
     } catch (e) {
       return {"ok": false, "error": "Network error: $e"};
     }
   }
 
   /// ==================================================
-  /// FETCH AND STORE PROFILE
+  /// FETCH PROFILE (API)
   /// ==================================================
   static Future<bool> _fetchAndStoreProfile() async {
     try {
       final token = await _getToken();
+
       if (token == null) {
-        print("⚠️ No token for profile fetch");
+        print("⚠️ Cannot fetch profile → no token");
         return false;
       }
 
-      print("\n🔄 Fetching profile from API...");
+      print("🔍 Fetching profile...");
 
       final response = await http.get(
         Uri.parse("$baseUrl/api/profile"),
@@ -265,47 +226,30 @@ class AuthService {
         },
       ).timeout(const Duration(seconds: 15));
 
-      print("📡 Profile API Status: ${response.statusCode}");
-      print("📡 Profile API Body: ${response.body}");
+      print("📡 Status: ${response.statusCode}");
+      print("📡 Body: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final prefs = await SharedPreferences.getInstance();
 
-        // Extract and save all fields with multiple name variations
-        final username = data["username"]?.toString() ?? "";
-        final fullName = data["full_name"]?.toString() ?? 
-                        data["fullName"]?.toString() ?? 
-                        data["name"]?.toString() ?? "";
-        final email = data["email"]?.toString() ?? "";
-        final phone = data["phone"]?.toString() ?? 
-                     data["contact"]?.toString() ?? "";
-        final province = data["province"]?.toString() ?? "";
-        final municipality = data["municipality"]?.toString() ?? "";
-        final barangay = data["barangay"]?.toString() ?? "";
+        await prefs.setString(_usernameKey, data["username"] ?? "");
+        await prefs.setString(_fullNameKey,
+            data["full_name"] ?? data["fullName"] ?? "");
+        await prefs.setString(_emailKey, data["email"] ?? "");
+        await prefs.setString(_phoneKey,
+            data["phone"] ?? data["contact"] ?? "");
+        await prefs.setString(_provinceKey, data["province"] ?? "");
+        await prefs.setString(_municipalityKey, data["municipality"] ?? "");
+        await prefs.setString(_barangayKey, data["barangay"] ?? "");
 
-        await prefs.setString(_usernameKey, username);
-        await prefs.setString(_fullNameKey, fullName);
-        await prefs.setString(_emailKey, email);
-        await prefs.setString(_phoneKey, phone);
-        await prefs.setString(_provinceKey, province);
-        await prefs.setString(_municipalityKey, municipality);
-        await prefs.setString(_barangayKey, barangay);
-
-        print("✅ Profile saved:");
-        print("   - Username: $username");
-        print("   - Full Name: $fullName");
-        print("   - Email: $email");
-        print("   - Phone: $phone");
-        print("   - Province: $province");
-        print("   - Municipality: $municipality");
-        print("   - Barangay: $barangay\n");
+        print("✅ Profile stored locally");
 
         return true;
-      } else {
-        print("⚠️ Profile API returned: ${response.statusCode}");
-        return false;
       }
+
+      print("⚠️ Profile error: ${response.statusCode}");
+      return false;
     } catch (e) {
       print("❌ Profile fetch error: $e");
       return false;
@@ -317,15 +261,13 @@ class AuthService {
   /// ==================================================
   static Future<String?> getValidAccessToken() async {
     final token = await _getToken();
-    
+
     if (token == null || token.isEmpty) {
-      print("⚠️ No token found in storage");
+      print("⚠️ No token available");
       return null;
     }
 
-    // Don't check expiration - let the server handle it
-    // The server will return 401 if token is expired
-    print("✅ Token found: ${token.substring(0, 20)}...");
+    print("🔑 Token ready: ${token.substring(0, 25)}...");
     return token;
   }
 
@@ -333,15 +275,14 @@ class AuthService {
   /// LOGOUT
   /// ==================================================
   static Future<void> logout() async {
-    print("\n🚪 Logging out...");
+    print("🚪 Logging out...");
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     await _deleteToken();
-    print("✅ Logout complete\n");
   }
 
   /// ==================================================
-  /// GET LOCAL PROFILE
+  /// LOCAL PROFILE
   /// ==================================================
   static Future<Map<String, String?>> getUserProfile() async {
     final prefs = await SharedPreferences.getInstance();
@@ -357,7 +298,7 @@ class AuthService {
   }
 
   /// ==================================================
-  /// CHECK IF LOGGED IN
+  /// CHECK LOGIN STATUS
   /// ==================================================
   static Future<bool> isLoggedIn() async {
     final token = await _getToken();
