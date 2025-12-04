@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class AuthService {
   static const String baseUrl = "https://gassight.onrender.com";
 
-  // secure storage (not const)
+  // secure storage
   static final _secureStorage = FlutterSecureStorage();
 
   // keys
@@ -29,14 +29,13 @@ class AuthService {
     return null;
   }
 
-  /// Sanitizes input by removing potentially dangerous characters
+  /// Sanitize input
   static String sanitizeInput(String? input) {
     if (input == null || input.isEmpty) return "";
-    // Note: using normal string with escaped quotes to avoid raw-string pitfalls
     return input.replaceAll(RegExp("[<>\"'&;]"), "").trim();
   }
 
-  /// Save token to secure storage + shared prefs (backup)
+  /// Save token
   static Future<void> _saveToken(String token) async {
     try {
       await _secureStorage.write(key: _tokenKey, value: token);
@@ -48,30 +47,46 @@ class AuthService {
     }
   }
 
-  /// Private: read token from secure storage, fallback to prefs and sync back
+  /// Read token (secure storage → fallback to prefs)
   static Future<String?> _getToken() async {
     try {
       String? token = await _secureStorage.read(key: _tokenKey);
+
       if (token == null) {
         final prefs = await SharedPreferences.getInstance();
         token = prefs.getString(_tokenKey);
+
         if (token != null) {
-          // sync back
           await _secureStorage.write(key: _tokenKey, value: token);
         }
       }
+
       return token;
     } catch (e) {
-      print("⚠️ Secure storage read error: $e");
+      print("⚠ Secure storage read error: $e");
       final prefs = await SharedPreferences.getInstance();
       return prefs.getString(_tokenKey);
     }
   }
 
-  /// Public getter used by other modules
+  /// Public getter
   static Future<String?> getToken() => _getToken();
 
-  /// Delete token from both storages
+  /// ⭐ REQUIRED BY OTHER FILES — RESTORED
+  static Future<String?> getValidAccessToken() async {
+    String? token = await _getToken();
+
+    if (token != null && token.isNotEmpty) {
+      // sanitize before returning
+      token = sanitizeInput(token);
+      return token;
+    }
+
+    print("❌ No valid token found");
+    return null;
+  }
+
+  /// Delete token
   static Future<void> _deleteToken() async {
     try {
       await _secureStorage.delete(key: _tokenKey);
@@ -83,7 +98,7 @@ class AuthService {
     }
   }
 
-  /// Login: posts to /login, saves token and basic info, fetches profile
+  /// Login
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
       final response = await http
@@ -112,7 +127,6 @@ class AuthService {
         await prefs.setString(_usernameKey, username);
         await prefs.setBool(_isAdminKey, data["is_admin"] ?? false);
 
-        // fetch profile to populate local cache (best-effort)
         await _fetchAndStoreProfile();
 
         return {"ok": true};
@@ -166,7 +180,7 @@ class AuthService {
     }
   }
 
-  /// Fetch profile from API and store to SharedPreferences
+  /// Fetch profile & store locally
   static Future<bool> _fetchAndStoreProfile() async {
     try {
       final token = await _getToken();
@@ -203,7 +217,7 @@ class AuthService {
     }
   }
 
-  /// Logout: clear prefs and token
+  /// Logout
   static Future<void> logout() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -215,7 +229,7 @@ class AuthService {
     }
   }
 
-  /// Get local cached profile
+  /// Get cached profile
   static Future<Map<String, String?>> getUserProfile() async {
     final prefs = await SharedPreferences.getInstance();
     return {
