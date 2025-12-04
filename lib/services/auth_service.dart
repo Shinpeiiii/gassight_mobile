@@ -1,18 +1,16 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
   static const String baseUrl = "https://gassight.onrender.com";
 
-  // Secure storage for sensitive data
+  // Use both secure storage and shared preferences for redundancy
   static const _secureStorage = FlutterSecureStorage();
 
   // Storage keys
   static const _tokenKey = "jwt_token";
-  static const _refreshTokenKey = "refresh_token";
   static const _usernameKey = "username";
   static const _fullNameKey = "full_name";
   static const _emailKey = "email";
@@ -38,7 +36,7 @@ class AuthService {
     if (!password.contains(RegExp(r'[0-9]'))) {
       return "Password must contain at least one number";
     }
-    return null; // Password is strong
+    return null;
   }
 
   /// ==================================================
@@ -47,7 +45,6 @@ class AuthService {
   static String sanitizeInput(String? input) {
     if (input == null || input.isEmpty) return '';
     
-    // Remove potential XSS attempts
     String sanitized = input
         .replaceAll('<', '')
         .replaceAll('>', '')
@@ -60,18 +57,56 @@ class AuthService {
   }
 
   /// ==================================================
-  /// SECURE TOKEN STORAGE
+  /// TOKEN STORAGE (Dual storage for reliability)
   /// ==================================================
-  static Future<void> _saveTokenSecurely(String token) async {
-    await _secureStorage.write(key: _tokenKey, value: token);
+  static Future<void> _saveToken(String token) async {
+    try {
+      // Save to secure storage
+      await _secureStorage.write(key: _tokenKey, value: token);
+      
+      // Also save to shared preferences as backup
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+      
+      print("✅ Token saved to both secure storage and SharedPreferences");
+    } catch (e) {
+      print("❌ Error saving token: $e");
+    }
   }
 
-  static Future<String?> _getTokenSecurely() async {
-    return await _secureStorage.read(key: _tokenKey);
+  static Future<String?> _getToken() async {
+    try {
+      // Try secure storage first
+      String? token = await _secureStorage.read(key: _tokenKey);
+      
+      // If not found, try shared preferences
+      if (token == null) {
+        final prefs = await SharedPreferences.getInstance();
+        token = prefs.getString(_tokenKey);
+        
+        // If found in prefs, save back to secure storage
+        if (token != null) {
+          await _secureStorage.write(key: _tokenKey, value: token);
+        }
+      }
+      
+      return token;
+    } catch (e) {
+      print("❌ Error getting token: $e");
+      // Fallback to shared preferences
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_tokenKey);
+    }
   }
 
-  static Future<void> _deleteTokenSecurely() async {
-    await _secureStorage.delete(key: _tokenKey);
+  static Future<void> _deleteToken() async {
+    try {
+      await _secureStorage.delete(key: _tokenKey);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tokenKey);
+    } catch (e) {
+      print("❌ Error deleting token: $e");
+    }
   }
 
   /// ==================================================
@@ -79,7 +114,10 @@ class AuthService {
   /// ==================================================
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
-      print("🔐 Attempting login for: $username");
+      print("\n" + "=" * 50);
+      print("🔐 LOGIN ATTEMPT");
+      print("=" * 50);
+      print("Username: $username");
       
       final response = await http.post(
         Uri.parse("$baseUrl/login"),
@@ -89,75 +127,73 @@ class AuthService {
         },
         body: jsonEncode({
           "username": sanitizeInput(username),
-          "password": password, // Don't sanitize password
+          "password": password,
         }),
       ).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 15),
         onTimeout: () {
-          throw Exception("Connection timeout");
+          throw Exception("Connection timeout - server took too long to respond");
         },
       );
 
       print("📡 Login Response Status: ${response.statusCode}");
       print("📡 Login Response Body: ${response.body}");
 
-      // Validate JSON response
       if (response.headers["content-type"]?.contains("application/json") != true) {
+        print("❌ Invalid response type");
         return {
           "ok": false,
-          "error": "Invalid server response. Code ${response.statusCode}"
+          "error": "Invalid server response"
         };
       }
 
       Map<String, dynamic> data;
       try {
         data = jsonDecode(response.body);
-      } catch (_) {
-        return {"ok": false, "error": "Invalid JSON response from server."};
+      } catch (e) {
+        print("❌ JSON parse error: $e");
+        return {"ok": false, "error": "Invalid server response"};
       }
 
-      // Success
       if (response.statusCode == 200 && data["success"] == true) {
         final prefs = await SharedPreferences.getInstance();
 
-        // Store JWT token securely
+        // Save token
         final token = data["token"];
-        if (token != null) {
-          await _saveTokenSecurely(token);
-          print("✅ Token saved securely");
+        if (token != null && token.isNotEmpty) {
+          await _saveToken(token);
+          print("✅ Token saved: ${token.substring(0, 20)}...");
+        } else {
+          print("⚠️ No token in response!");
         }
 
-        // Store basic user info from login response
+        // Save username
         await prefs.setString(_usernameKey, username);
         await prefs.setBool(_isAdminKey, data["is_admin"] ?? false);
         
-        // Store user profile data if provided in login response
-        if (data["user"] != null) {
-          final userData = data["user"];
-          await prefs.setString(_fullNameKey, userData["full_name"] ?? userData["fullName"] ?? "");
-          await prefs.setString(_emailKey, userData["email"] ?? "");
-          await prefs.setString(_phoneKey, userData["phone"] ?? userData["contact"] ?? "");
-          await prefs.setString(_provinceKey, userData["province"] ?? "");
-          await prefs.setString(_municipalityKey, userData["municipality"] ?? "");
-          await prefs.setString(_barangayKey, userData["barangay"] ?? "");
-          print("✅ User profile saved from login response");
-        }
+        print("✅ Basic info saved");
 
-        // Fetch and store full profile from API
+        // Try to get profile immediately
+        await Future.delayed(const Duration(milliseconds: 500));
         await _fetchAndStoreProfile();
 
+        print("✅ Login successful!");
+        print("=" * 50 + "\n");
+        
         return {"ok": true};
       }
 
-      return {"ok": false, "error": data["error"] ?? "Login failed."};
+      print("❌ Login failed: ${data['error']}");
+      return {"ok": false, "error": data["error"] ?? "Login failed"};
+      
     } catch (e) {
-      print("❌ Login error: $e");
+      print("❌ Login exception: $e");
       return {"ok": false, "error": "Network error: $e"};
     }
   }
 
   /// ==================================================
-  /// SIGNUP WITH VALIDATION
+  /// SIGNUP
   /// ==================================================
   static Future<Map<String, dynamic>> signup(
     String username,
@@ -169,7 +205,6 @@ class AuthService {
     String municipality,
     String barangay,
   ) async {
-    // Validate password strength
     final passwordError = validatePasswordStrength(password);
     if (passwordError != null) {
       return {"ok": false, "error": passwordError};
@@ -192,12 +227,7 @@ class AuthService {
           "municipality": sanitizeInput(municipality),
           "barangay": sanitizeInput(barangay),
         }),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception("Connection timeout");
-        },
-      );
+      ).timeout(const Duration(seconds: 15));
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
 
@@ -207,7 +237,7 @@ class AuthService {
 
       return {
         "ok": false,
-        "error": data["error"] ?? "Signup failed. Code ${response.statusCode}"
+        "error": data["error"] ?? "Signup failed"
       };
     } catch (e) {
       return {"ok": false, "error": "Network error: $e"};
@@ -215,26 +245,25 @@ class AuthService {
   }
 
   /// ==================================================
-  /// FETCH PROFILE FROM SERVER
+  /// FETCH AND STORE PROFILE
   /// ==================================================
-  static Future<void> _fetchAndStoreProfile() async {
+  static Future<bool> _fetchAndStoreProfile() async {
     try {
-      final token = await _getTokenSecurely();
+      final token = await _getToken();
       if (token == null) {
-        print("⚠️ No token available for profile fetch");
-        return;
+        print("⚠️ No token for profile fetch");
+        return false;
       }
 
-      print("🔄 Fetching profile from API...");
+      print("\n🔄 Fetching profile from API...");
 
       final response = await http.get(
         Uri.parse("$baseUrl/api/profile"),
         headers: {
           "Authorization": "Bearer $token",
-          "User-Agent": "GASsight-Mobile/1.0",
           "Content-Type": "application/json",
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
       print("📡 Profile API Status: ${response.statusCode}");
       print("📡 Profile API Body: ${response.body}");
@@ -243,25 +272,43 @@ class AuthService {
         final data = jsonDecode(response.body);
         final prefs = await SharedPreferences.getInstance();
 
-        // Save all profile fields
-        await prefs.setString(_usernameKey, data["username"]?.toString() ?? "");
-        await prefs.setString(_fullNameKey, data["full_name"]?.toString() ?? data["fullName"]?.toString() ?? "");
-        await prefs.setString(_emailKey, data["email"]?.toString() ?? "");
-        await prefs.setString(_phoneKey, data["phone"]?.toString() ?? data["contact"]?.toString() ?? "");
-        await prefs.setString(_provinceKey, data["province"]?.toString() ?? "");
-        await prefs.setString(_municipalityKey, data["municipality"]?.toString() ?? "");
-        await prefs.setString(_barangayKey, data["barangay"]?.toString() ?? "");
-        
-        print("✅ Profile saved to local storage");
-        print("   - Username: ${data["username"]}");
-        print("   - Full Name: ${data["full_name"] ?? data["fullName"]}");
-        print("   - Email: ${data["email"]}");
-        print("   - Province: ${data["province"]}");
+        // Extract and save all fields with multiple name variations
+        final username = data["username"]?.toString() ?? "";
+        final fullName = data["full_name"]?.toString() ?? 
+                        data["fullName"]?.toString() ?? 
+                        data["name"]?.toString() ?? "";
+        final email = data["email"]?.toString() ?? "";
+        final phone = data["phone"]?.toString() ?? 
+                     data["contact"]?.toString() ?? "";
+        final province = data["province"]?.toString() ?? "";
+        final municipality = data["municipality"]?.toString() ?? "";
+        final barangay = data["barangay"]?.toString() ?? "";
+
+        await prefs.setString(_usernameKey, username);
+        await prefs.setString(_fullNameKey, fullName);
+        await prefs.setString(_emailKey, email);
+        await prefs.setString(_phoneKey, phone);
+        await prefs.setString(_provinceKey, province);
+        await prefs.setString(_municipalityKey, municipality);
+        await prefs.setString(_barangayKey, barangay);
+
+        print("✅ Profile saved:");
+        print("   - Username: $username");
+        print("   - Full Name: $fullName");
+        print("   - Email: $email");
+        print("   - Phone: $phone");
+        print("   - Province: $province");
+        print("   - Municipality: $municipality");
+        print("   - Barangay: $barangay\n");
+
+        return true;
       } else {
-        print("⚠️ Failed to fetch profile: ${response.statusCode}");
+        print("⚠️ Profile API returned: ${response.statusCode}");
+        return false;
       }
     } catch (e) {
-      print("❌ Error fetching profile: $e");
+      print("❌ Profile fetch error: $e");
+      return false;
     }
   }
 
@@ -269,61 +316,28 @@ class AuthService {
   /// GET VALID TOKEN
   /// ==================================================
   static Future<String?> getValidAccessToken() async {
-    final token = await _getTokenSecurely();
+    final token = await _getToken();
     
-    if (token == null) {
-      print("⚠️ No token found");
+    if (token == null || token.isEmpty) {
+      print("⚠️ No token found in storage");
       return null;
     }
 
-    // Check if token is expired
-    if (_isTokenExpired(token)) {
-      print("⚠️ Token expired");
-      await _deleteTokenSecurely();
-      return null;
-    }
-
+    // Don't check expiration - let the server handle it
+    // The server will return 401 if token is expired
+    print("✅ Token found: ${token.substring(0, 20)}...");
     return token;
-  }
-
-  /// ==================================================
-  /// CHECK IF TOKEN IS EXPIRED
-  /// ==================================================
-  static bool _isTokenExpired(String token) {
-    try {
-      // JWT format: header.payload.signature
-      final parts = token.split('.');
-      if (parts.length != 3) return true;
-
-      // Decode payload
-      final payload = parts[1];
-      final normalized = base64Url.normalize(payload);
-      final resp = utf8.decode(base64Url.decode(normalized));
-      final payloadMap = json.decode(resp);
-
-      // Check expiration
-      if (payloadMap['exp'] != null) {
-        final exp = payloadMap['exp'] as int;
-        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-        return now >= exp;
-      }
-
-      return false;
-    } catch (e) {
-      print("❌ Error checking token expiration: $e");
-      return true; // If we can't parse, assume expired
-    }
   }
 
   /// ==================================================
   /// LOGOUT
   /// ==================================================
   static Future<void> logout() async {
-    print("🚪 Logging out...");
+    print("\n🚪 Logging out...");
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    await _deleteTokenSecurely();
-    print("✅ Logout complete");
+    await _deleteToken();
+    print("✅ Logout complete\n");
   }
 
   /// ==================================================
@@ -331,7 +345,7 @@ class AuthService {
   /// ==================================================
   static Future<Map<String, String?>> getUserProfile() async {
     final prefs = await SharedPreferences.getInstance();
-    final profile = {
+    return {
       "username": prefs.getString(_usernameKey),
       "full_name": prefs.getString(_fullNameKey),
       "email": prefs.getString(_emailKey),
@@ -340,67 +354,20 @@ class AuthService {
       "municipality": prefs.getString(_municipalityKey),
       "barangay": prefs.getString(_barangayKey),
     };
-    
-    print("📋 Retrieved local profile: $profile");
-    return profile;
   }
 
   /// ==================================================
   /// CHECK IF LOGGED IN
   /// ==================================================
   static Future<bool> isLoggedIn() async {
-    final token = await getValidAccessToken();
-    return token != null;
+    final token = await _getToken();
+    return token != null && token.isNotEmpty;
   }
 
   /// ==================================================
-  /// MAKE AUTHENTICATED REQUEST
-  /// ==================================================
-  static Future<http.Response> authenticatedRequest(
-    String method,
-    String endpoint, {
-    Map<String, String>? headers,
-    dynamic body,
-  }) async {
-    final token = await getValidAccessToken();
-    
-    if (token == null) {
-      throw Exception("Not authenticated");
-    }
-
-    final requestHeaders = {
-      "Authorization": "Bearer $token",
-      "Content-Type": "application/json",
-      "User-Agent": "GASsight-Mobile/1.0",
-      ...?headers,
-    };
-
-    final uri = Uri.parse("$baseUrl$endpoint");
-
-    switch (method.toUpperCase()) {
-      case 'GET':
-        return await http.get(uri, headers: requestHeaders);
-      case 'POST':
-        return await http.post(uri, headers: requestHeaders, body: body);
-      case 'PUT':
-        return await http.put(uri, headers: requestHeaders, body: body);
-      case 'DELETE':
-        return await http.delete(uri, headers: requestHeaders);
-      default:
-        throw Exception("Unsupported HTTP method");
-    }
-  }
-
-  /// ==================================================
-  /// REFRESH USER PROFILE
+  /// REFRESH PROFILE
   /// ==================================================
   static Future<bool> refreshProfile() async {
-    try {
-      await _fetchAndStoreProfile();
-      return true;
-    } catch (e) {
-      print("❌ Error refreshing profile: $e");
-      return false;
-    }
+    return await _fetchAndStoreProfile();
   }
 }

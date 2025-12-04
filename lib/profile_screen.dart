@@ -120,15 +120,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         print("✅ Profile loaded successfully!");
         print("=" * 50);
-      } else if (response.statusCode == 401) {
+      } else       } else if (response.statusCode == 401) {
         // Token expired or invalid
         print("❌ Unauthorized - token may be expired");
-        await AuthService.logout();
+        setState(() {
+          _loading = false;
+          _error = "Session expired. Please log in again.";
+        });
+        
+        // Show dialog before logging out
         if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (_) => false,
+          await showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text("Session Expired"),
+              content: const Text("Your session has expired. Please log in again."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    AuthService.logout();
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (_) => false,
+                    );
+                  },
+                  child: const Text("OK"),
+                ),
+              ],
+            ),
           );
         }
       } else {
