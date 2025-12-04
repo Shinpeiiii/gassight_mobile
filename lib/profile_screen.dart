@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 
@@ -20,14 +21,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadProfile();
-    _debugCheckStorage();
-  }
-
-  Future<void> _debugCheckStorage() async {
-    final profile = await AuthService.getUserProfile();
-    print("🔍 DEBUG - Profile in storage: $profile");
-    final token = await AuthService.getValidAccessToken();
-    print("🔍 DEBUG - Has valid token: ${token != null}");
   }
 
   Future<void> _loadProfile() async {
@@ -37,96 +30,121 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      // First, try to get locally stored profile
-      final localProfile = await AuthService.getUserProfile();
-      
-      if (localProfile['username'] != null) {
-        // Use local data immediately
-        setState(() {
-          _profile = localProfile;
-          _loading = false;
-        });
-        print("✅ Loaded profile from local storage");
-      }
+      print("=" * 50);
+      print("🔍 STARTING PROFILE LOAD");
+      print("=" * 50);
 
-      // Then try to fetch fresh data from API
+      // Get token
       final token = await AuthService.getValidAccessToken();
       
       if (token == null) {
-        // If no token and no local profile, show error
-        if (localProfile['username'] == null) {
-          if (mounted) {
-            setState(() {
-              _loading = false;
-              _error = "Not logged in";
-            });
-          }
+        print("❌ No valid token found");
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = "Not logged in. Please log in again.";
+          });
         }
         return;
       }
 
-      print("🔑 Token obtained, fetching fresh profile...");
+      print("✅ Token found: ${token.substring(0, 20)}...");
 
-      // Fetch profile from API
+      // Try to fetch from API
+      print("📡 Fetching profile from API...");
+      
       final response = await http.get(
         Uri.parse('${AuthService.baseUrl}/api/profile'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
-      print("📡 API Response Status: ${response.statusCode}");
+      print("📡 Response Status: ${response.statusCode}");
+      print("📡 Response Body: ${response.body}");
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        print("✅ Parsed response data: $data");
+
+        // Try multiple field name variations
+        final username = data['username']?.toString() ?? '';
+        final fullName = data['full_name']?.toString() ?? 
+                        data['fullName']?.toString() ?? 
+                        data['name']?.toString() ?? '';
+        final email = data['email']?.toString() ?? '';
+        final phone = data['phone']?.toString() ?? 
+                     data['contact']?.toString() ?? 
+                     data['phoneNumber']?.toString() ?? '';
+        final province = data['province']?.toString() ?? '';
+        final municipality = data['municipality']?.toString() ?? 
+                           data['city']?.toString() ?? '';
+        final barangay = data['barangay']?.toString() ?? '';
+
+        print("📝 Extracted data:");
+        print("   Username: $username");
+        print("   Full Name: $fullName");
+        print("   Email: $email");
+        print("   Phone: $phone");
+        print("   Province: $province");
+        print("   Municipality: $municipality");
+        print("   Barangay: $barangay");
+
+        // Save to local storage
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('username', username);
+        await prefs.setString('full_name', fullName);
+        await prefs.setString('email', email);
+        await prefs.setString('phone', phone);
+        await prefs.setString('province', province);
+        await prefs.setString('municipality', municipality);
+        await prefs.setString('barangay', barangay);
         
+        print("💾 Saved to local storage");
+
         setState(() {
           _profile = {
-            'username': data['username']?.toString(),
-            'full_name': data['full_name']?.toString() ?? data['fullName']?.toString(),
-            'email': data['email']?.toString(),
-            'phone': data['phone']?.toString() ?? data['contact']?.toString(),
-            'province': data['province']?.toString(),
-            'municipality': data['municipality']?.toString(),
-            'barangay': data['barangay']?.toString(),
+            'username': username,
+            'full_name': fullName,
+            'email': email,
+            'phone': phone,
+            'province': province,
+            'municipality': municipality,
+            'barangay': barangay,
           };
           _loading = false;
         });
 
-        print("✅ Profile updated from API: $_profile");
-      } else if (localProfile['username'] != null) {
-        // If API fails but we have local data, keep using it
-        print("⚠️ API returned ${response.statusCode}, using local profile");
-        setState(() {
-          _loading = false;
-        });
+        print("✅ Profile loaded successfully!");
+        print("=" * 50);
+      } else if (response.statusCode == 401) {
+        // Token expired or invalid
+        print("❌ Unauthorized - token may be expired");
+        await AuthService.logout();
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (_) => false,
+          );
+        }
       } else {
+        print("❌ API Error: ${response.statusCode}");
         setState(() {
           _loading = false;
-          _error = "Failed to load profile (Status: ${response.statusCode})";
+          _error = "Failed to load profile. Status: ${response.statusCode}\n\nPlease try refreshing or log in again.";
         });
       }
     } catch (e) {
-      print("❌ Error loading profile: $e");
-      
-      // If we already have local profile data, keep using it
-      if (_profile['username'] != null) {
-        print("⚠️ Using cached profile data due to network error");
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _error = "Network error. Please try again.";
-          });
-        }
+      print("❌ Exception loading profile: $e");
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = "Network error: $e\n\nPlease check your connection and try again.";
+        });
       }
     }
   }
@@ -192,37 +210,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   CircularProgressIndicator(color: Color(0xFF2C7A2C)),
                   SizedBox(height: 16),
                   Text("Loading profile..."),
+                  SizedBox(height: 8),
+                  Text(
+                    "This may take a few seconds",
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                 ],
               ),
             )
           : _error != null
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error_outline, 
-                        size: 64, 
-                        color: Colors.red,
-                      ),
-                      const SizedBox(height: 16),
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline, 
+                          size: 64, 
+                          color: Colors.red,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
                           _error!,
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: Colors.red),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: _loadProfile,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text("Retry"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2C7A2C),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _loadProfile,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text("Retry"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2C7A2C),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _logout,
+                          icon: const Icon(Icons.logout),
+                          label: const Text("Log Out"),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : _buildProfileContent(),
