@@ -1,7 +1,7 @@
 plugins {
-    id "com.android.application";
-    id "kotlin-android";
-    id "dev.flutter.flutter-gradle-plugin";
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 def localProperties = new Properties()
@@ -23,14 +23,13 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace "com.example.gassight" // Change this to your package name
-    compileSdk 34 // ✅ Changed from 33 to 34
+    namespace = "com.example.gassight_mobile"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // ✅ ADD THESE TWO LINES - Enable desugaring
-        coreLibraryDesugaringEnabled true
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     kotlinOptions {
@@ -42,26 +41,22 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.example.gassight" // Change this to your package name
-        minSdk 21 // ✅ Minimum SDK for flutter_local_notifications
-        targetSdk 34 // ✅ Changed from 33 to 34
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
-        multiDexEnabled true // ✅ ADD THIS LINE
+        applicationId = "com.example.gassight_mobile"
+        minSdk = 21
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutterVersionCode.toInteger()
+        versionName = flutterVersionName
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.debug
         }
     }
 }
 
 flutter {
-    source '../..'
+    source = "../.."
 }
 
-dependencies {
-    // ✅ ADD THIS LINE - Core library desugaring dependency
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
-}
+dependencies {}
