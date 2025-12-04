@@ -35,14 +35,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       print("🔍 PROFILE DEBUG - CHECKING TOKEN SOURCE");
       print("=" * 60);
 
-      // ---------------------------
-      // FIX: Use AuthService.getToken()
-      // ---------------------------
       final token = await AuthService.getToken();
-      print("🔐 Token from AuthService: ${token != null ? token.substring(0, (token.length >= 25 ? 25 : token.length)) + '...' : 'NULL'}");
+
+      print("🔐 Token from AuthService: "
+          "${token != null ? token.substring(0, token.length >= 25 ? 25 : token.length) + '...' : 'NULL'}");
 
       if (token == null || token.isEmpty) {
-        print("❌ NO TOKEN FOUND VIA AUTHSERVICE");
         if (mounted) {
           setState(() {
             _loading = false;
@@ -52,10 +50,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      print("✅ Using token: ${token.substring(0, (token.length >= 25 ? 25 : token.length))}...");
-      print("\n📡 Attempting API call...");
+      print("📡 Fetching /api/profile ...");
 
-      // Make API request
       final response = await http
           .get(
             Uri.parse('https://gassight.onrender.com/api/profile'),
@@ -68,52 +64,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       print("📡 Status: ${response.statusCode}");
       print("📡 Body: ${response.body}");
-      print("=" * 60 + "\n");
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // Extract all possible field variations
-        final username = data['username']?.toString() ?? '';
-        final fullName = data['full_name']?.toString() ?? data['fullName']?.toString() ?? '';
-        final email = data['email']?.toString() ?? '';
-        final phone = data['phone']?.toString() ?? data['contact']?.toString() ?? '';
-        final province = data['province']?.toString() ?? '';
-        final municipality = data['municipality']?.toString() ?? '';
-        final barangay = data['barangay']?.toString() ?? '';
+        final username = data['username']?.toString() ?? "";
+        final fullName = data['full_name']?.toString() ??
+            data['fullName']?.toString() ??
+            "";
+        final email = data['email']?.toString() ?? "";
+        final phone =
+            data['phone']?.toString() ?? data['contact']?.toString() ?? "";
+        final province = data['province']?.toString() ?? "";
+        final municipality = data['municipality']?.toString() ?? "";
+        final barangay = data['barangay']?.toString() ?? "";
 
-        print("💾 Saving profile data...");
+        print("💾 Saving profile to SharedPreferences...");
 
-        // Save to SharedPreferences
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('username', username);
-        await prefs.setString('full_name', fullName);
-        await prefs.setString('email', email);
-        await prefs.setString('phone', phone);
-        await prefs.setString('province', province);
-        await prefs.setString('municipality', municipality);
-        await prefs.setString('barangay', barangay);
-
-        print("✅ Profile saved!");
+        await prefs.setString("username", username);
+        await prefs.setString("full_name", fullName);
+        await prefs.setString("email", email);
+        await prefs.setString("phone", phone);
+        await prefs.setString("province", province);
+        await prefs.setString("municipality", municipality);
+        await prefs.setString("barangay", barangay);
 
         setState(() {
           _profile = {
-            'username': username,
-            'full_name': fullName,
-            'email': email,
-            'phone': phone,
-            'province': province,
-            'municipality': municipality,
-            'barangay': barangay,
+            "username": username,
+            "full_name": fullName,
+            "email": email,
+            "phone": phone,
+            "province": province,
+            "municipality": municipality,
+            "barangay": barangay,
           };
           _loading = false;
         });
       } else if (response.statusCode == 401) {
-        print("❌ Token expired or invalid");
+        print("❌ INVALID/EXPIRED TOKEN — Logging out...");
 
-        // Clear all storage
         final prefs = await SharedPreferences.getInstance();
         await prefs.clear();
         await const FlutterSecureStorage().deleteAll();
@@ -122,7 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (context) => AlertDialog(
+            builder: (_) => AlertDialog(
               title: const Text("Session Expired"),
               content: const Text("Please log in again."),
               actions: [
@@ -142,18 +135,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       } else {
         setState(() {
-          _loading = false;
           _error = "Server error: ${response.statusCode}";
+          _loading = false;
         });
       }
     } catch (e) {
       print("❌ ERROR: $e");
-      print("=" * 60 + "\n");
 
       if (mounted) {
         setState(() {
-          _loading = false;
           _error = "Error: $e";
+          _loading = false;
         });
       }
     }
@@ -162,18 +154,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         title: const Text("Logout"),
         content: const Text("Are you sure you want to logout?"),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
             child: const Text("Cancel"),
+            onPressed: () => Navigator.pop(context, false),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text("Logout"),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
           ),
         ],
       ),
@@ -181,13 +173,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (confirm != true) return;
 
-    // Clear everything
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-
     await const FlutterSecureStorage().deleteAll();
-
-    if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
@@ -208,206 +196,134 @@ class _ProfileScreenState extends State<ProfileScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _debugAndLoadProfile,
-            tooltip: "Refresh",
           ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
-            tooltip: "Logout",
           ),
         ],
       ),
       body: _loading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFF2C7A2C)),
-                  SizedBox(height: 16),
-                  Text("Loading profile..."),
-                  SizedBox(height: 8),
-                  Text(
-                    "Please wait...",
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-            )
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: Colors.red,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _error!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "Check console logs for details",
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _debugAndLoadProfile,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text("Retry"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2C7A2C),
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: _logout,
-                          icon: const Icon(Icons.logout),
-                          label: const Text("Log Out & Start Fresh"),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : _buildProfileContent(),
+          ? _loadingWidget()
+          : (_error != null ? _errorWidget() : _profileWidget()),
     );
   }
 
-  Widget _buildProfileContent() {
+  Widget _loadingWidget() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: Color(0xFF2C7A2C)),
+          SizedBox(height: 12),
+          Text("Loading profile..."),
+        ],
+      ),
+    );
+  }
+
+  Widget _errorWidget() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 60, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(_error!, textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.red, fontSize: 16)),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _debugAndLoadProfile,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2C7A2C),
+              ),
+              child: const Text("Retry"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _profileWidget() {
     final p = _profile;
-    final name = p["full_name"] ?? p["username"] ?? "User";
-    final username = p["username"] ?? "N/A";
+    final name = p["full_name"] ?? "User";
+    final username = p["username"] ?? "unknown";
 
     return SingleChildScrollView(
       child: Column(
         children: [
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF2C7A2C), Color(0xFF1E5A1E)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
-            child: Column(
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 10,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      _getInitials(name),
-                      style: const TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2C7A2C),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "@$username",
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white.withOpacity(0.8),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _headerSection(name, username),
           Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _sectionHeader("Account Information", Icons.person),
-                const SizedBox(height: 12),
                 _infoCard("Username", p["username"], Icons.account_circle),
                 _infoCard("Full Name", p["full_name"], Icons.badge),
                 _infoCard("Email", p["email"], Icons.email),
                 _infoCard("Phone", p["phone"], Icons.phone),
-                const SizedBox(height: 24),
+
+                const SizedBox(height: 20),
                 _sectionHeader("Location Information", Icons.location_on),
-                const SizedBox(height: 12),
                 _infoCard("Province", p["province"], Icons.map),
                 _infoCard("Municipality", p["municipality"], Icons.location_city),
                 _infoCard("Barangay", p["barangay"], Icons.home),
+
                 const SizedBox(height: 30),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.arrow_back),
-                        label: const Text("Back"),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          foregroundColor: const Color(0xFF2C7A2C),
-                          side: const BorderSide(color: Color(0xFF2C7A2C)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _logout,
-                        icon: const Icon(Icons.logout),
-                        label: const Text("Logout"),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          backgroundColor: Colors.red,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                ElevatedButton.icon(
+                  onPressed: _logout,
+                  icon: const Icon(Icons.logout),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  label: const Text("Logout"),
+                )
               ],
             ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _headerSection(String name, String username) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 30),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF2C7A2C), Color(0xFF1E5A1E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 40,
+            backgroundColor: Colors.white,
+            child: Text(
+              _getInitials(name),
+              style: const TextStyle(
+                fontSize: 32,
+                color: Color(0xFF2C7A2C),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            name,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          Text(
+            "@$username",
+            style: TextStyle(color: Colors.white.withOpacity(0.8)),
           ),
         ],
       ),
@@ -415,25 +331,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _getInitials(String name) {
-    if (name.isEmpty || name == "User" || name == "N/A") return "?";
-    final parts = name.trim().split(' ');
-    if (parts.length == 1) {
-      return parts[0][0].toUpperCase();
-    }
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    final parts = name.trim().split(" ");
+    if (parts.isEmpty) return "?";
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts.last[0]).toUpperCase();
   }
 
   Widget _sectionHeader(String title, IconData icon) {
     return Row(
       children: [
-        Icon(icon, color: const Color(0xFF2C7A2C), size: 24),
+        Icon(icon, color: const Color(0xFF2C7A2C)),
         const SizedBox(width: 8),
         Text(
           title,
           style: const TextStyle(
+            color: Color(0xFF2C7A2C),
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF2C7A2C),
           ),
         ),
       ],
@@ -442,9 +356,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _infoCard(String label, String? value, IconData icon) {
     return Container(
-      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -452,46 +365,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
             blurRadius: 6,
-            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2C7A2C).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: const Color(0xFF2C7A2C), size: 20),
-          ),
+          Icon(icon, color: const Color(0xFF2C7A2C)),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(label,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 const SizedBox(height: 4),
                 Text(
                   value != null && value.isNotEmpty ? value : "Not provided",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: value != null && value.isNotEmpty ? Colors.black87 : Colors.grey[400],
-                  ),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
-          ),
+          )
         ],
       ),
     );
