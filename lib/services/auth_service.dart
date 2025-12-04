@@ -79,6 +79,8 @@ class AuthService {
   /// ==================================================
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
+      print("🔐 Attempting login for: $username");
+      
       final response = await http.post(
         Uri.parse("$baseUrl/login"),
         headers: {
@@ -95,6 +97,9 @@ class AuthService {
           throw Exception("Connection timeout");
         },
       );
+
+      print("📡 Login Response Status: ${response.statusCode}");
+      print("📡 Login Response Body: ${response.body}");
 
       // Validate JSON response
       if (response.headers["content-type"]?.contains("application/json") != true) {
@@ -119,13 +124,26 @@ class AuthService {
         final token = data["token"];
         if (token != null) {
           await _saveTokenSecurely(token);
+          print("✅ Token saved securely");
         }
 
-        // Store user info
+        // Store basic user info from login response
         await prefs.setString(_usernameKey, username);
         await prefs.setBool(_isAdminKey, data["is_admin"] ?? false);
+        
+        // Store user profile data if provided in login response
+        if (data["user"] != null) {
+          final userData = data["user"];
+          await prefs.setString(_fullNameKey, userData["full_name"] ?? userData["fullName"] ?? "");
+          await prefs.setString(_emailKey, userData["email"] ?? "");
+          await prefs.setString(_phoneKey, userData["phone"] ?? userData["contact"] ?? "");
+          await prefs.setString(_provinceKey, userData["province"] ?? "");
+          await prefs.setString(_municipalityKey, userData["municipality"] ?? "");
+          await prefs.setString(_barangayKey, userData["barangay"] ?? "");
+          print("✅ User profile saved from login response");
+        }
 
-        // Fetch and store full profile
+        // Fetch and store full profile from API
         await _fetchAndStoreProfile();
 
         return {"ok": true};
@@ -133,6 +151,7 @@ class AuthService {
 
       return {"ok": false, "error": data["error"] ?? "Login failed."};
     } catch (e) {
+      print("❌ Login error: $e");
       return {"ok": false, "error": "Network error: $e"};
     }
   }
@@ -201,29 +220,48 @@ class AuthService {
   static Future<void> _fetchAndStoreProfile() async {
     try {
       final token = await _getTokenSecurely();
-      if (token == null) return;
+      if (token == null) {
+        print("⚠️ No token available for profile fetch");
+        return;
+      }
+
+      print("🔄 Fetching profile from API...");
 
       final response = await http.get(
         Uri.parse("$baseUrl/api/profile"),
         headers: {
           "Authorization": "Bearer $token",
           "User-Agent": "GASsight-Mobile/1.0",
+          "Content-Type": "application/json",
         },
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      print("📡 Profile API Status: ${response.statusCode}");
+      print("📡 Profile API Body: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final prefs = await SharedPreferences.getInstance();
 
-        await prefs.setString(_fullNameKey, data["full_name"] ?? "");
-        await prefs.setString(_emailKey, data["email"] ?? "");
-        await prefs.setString(_phoneKey, data["phone"] ?? "");
-        await prefs.setString(_provinceKey, data["province"] ?? "");
-        await prefs.setString(_municipalityKey, data["municipality"] ?? "");
-        await prefs.setString(_barangayKey, data["barangay"] ?? "");
+        // Save all profile fields
+        await prefs.setString(_usernameKey, data["username"]?.toString() ?? "");
+        await prefs.setString(_fullNameKey, data["full_name"]?.toString() ?? data["fullName"]?.toString() ?? "");
+        await prefs.setString(_emailKey, data["email"]?.toString() ?? "");
+        await prefs.setString(_phoneKey, data["phone"]?.toString() ?? data["contact"]?.toString() ?? "");
+        await prefs.setString(_provinceKey, data["province"]?.toString() ?? "");
+        await prefs.setString(_municipalityKey, data["municipality"]?.toString() ?? "");
+        await prefs.setString(_barangayKey, data["barangay"]?.toString() ?? "");
+        
+        print("✅ Profile saved to local storage");
+        print("   - Username: ${data["username"]}");
+        print("   - Full Name: ${data["full_name"] ?? data["fullName"]}");
+        print("   - Email: ${data["email"]}");
+        print("   - Province: ${data["province"]}");
+      } else {
+        print("⚠️ Failed to fetch profile: ${response.statusCode}");
       }
     } catch (e) {
-      print("Error fetching profile: $e");
+      print("❌ Error fetching profile: $e");
     }
   }
 
@@ -233,10 +271,14 @@ class AuthService {
   static Future<String?> getValidAccessToken() async {
     final token = await _getTokenSecurely();
     
-    if (token == null) return null;
+    if (token == null) {
+      print("⚠️ No token found");
+      return null;
+    }
 
     // Check if token is expired
     if (_isTokenExpired(token)) {
+      print("⚠️ Token expired");
       await _deleteTokenSecurely();
       return null;
     }
@@ -268,6 +310,7 @@ class AuthService {
 
       return false;
     } catch (e) {
+      print("❌ Error checking token expiration: $e");
       return true; // If we can't parse, assume expired
     }
   }
@@ -276,9 +319,11 @@ class AuthService {
   /// LOGOUT
   /// ==================================================
   static Future<void> logout() async {
+    print("🚪 Logging out...");
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     await _deleteTokenSecurely();
+    print("✅ Logout complete");
   }
 
   /// ==================================================
@@ -286,7 +331,7 @@ class AuthService {
   /// ==================================================
   static Future<Map<String, String?>> getUserProfile() async {
     final prefs = await SharedPreferences.getInstance();
-    return {
+    final profile = {
       "username": prefs.getString(_usernameKey),
       "full_name": prefs.getString(_fullNameKey),
       "email": prefs.getString(_emailKey),
@@ -295,6 +340,9 @@ class AuthService {
       "municipality": prefs.getString(_municipalityKey),
       "barangay": prefs.getString(_barangayKey),
     };
+    
+    print("📋 Retrieved local profile: $profile");
+    return profile;
   }
 
   /// ==================================================
@@ -351,6 +399,7 @@ class AuthService {
       await _fetchAndStoreProfile();
       return true;
     } catch (e) {
+      print("❌ Error refreshing profile: $e");
       return false;
     }
   }

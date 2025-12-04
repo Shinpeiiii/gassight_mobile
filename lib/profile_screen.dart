@@ -20,6 +20,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadProfile();
+    _debugCheckStorage();
+  }
+
+  Future<void> _debugCheckStorage() async {
+    final profile = await AuthService.getUserProfile();
+    print("🔍 DEBUG - Profile in storage: $profile");
+    final token = await AuthService.getValidAccessToken();
+    print("🔍 DEBUG - Has valid token: ${token != null}");
   }
 
   Future<void> _loadProfile() async {
