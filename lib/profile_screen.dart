@@ -120,7 +120,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         print("✅ Profile loaded successfully!");
         print("=" * 50);
-      } else       } else if (response.statusCode == 401) {
+      } else if (response.statusCode == 401) {
         // Token expired or invalid
         print("❌ Unauthorized - token may be expired");
         setState(() {
