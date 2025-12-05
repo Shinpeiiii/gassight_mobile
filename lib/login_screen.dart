@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/auth_service.dart';
 import 'user_dashboard.dart';
@@ -40,6 +41,22 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (result["ok"] == true) {
       print("✅ Login successful!");
+      
+      // Make sure data is saved to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check if profile data was saved during login
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      final savedUsername = prefs.getString('username');
+      print("📋 Checking saved data after login:");
+      print("   Username: $savedUsername");
+      print("   Full Name: ${prefs.getString('full_name')}");
+      print("   Email: ${prefs.getString('email')}");
+      print("   Phone: ${prefs.getString('phone')}");
+      print("   Province: ${prefs.getString('province')}");
+      print("   Municipality: ${prefs.getString('municipality')}");
+      print("   Barangay: ${prefs.getString('barangay')}");
       
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(

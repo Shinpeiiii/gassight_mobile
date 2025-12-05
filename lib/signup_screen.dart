@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../services/philippines_locations.dart';
 import 'login_screen.dart';
@@ -34,6 +35,16 @@ class _SignupScreenState extends State<SignupScreen> {
   void initState() {
     super.initState();
     _loadProvinces();
+  }
+
+  @override
+  void dispose() {
+    _username.dispose();
+    _password.dispose();
+    _fullName.dispose();
+    _email.dispose();
+    _phone.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProvinces() async {
@@ -112,6 +123,15 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() => _loading = true);
 
+    print("📝 Starting signup process...");
+    print("   Username: ${_username.text.trim()}");
+    print("   Full Name: ${_fullName.text.trim()}");
+    print("   Email: ${_email.text.trim()}");
+    print("   Phone: ${_phone.text.trim()}");
+    print("   Province: $_selectedProvince");
+    print("   Municipality: $_selectedMunicipality");
+    print("   Barangay: $_selectedBarangay");
+
     final res = await AuthService.signup(
       _username.text.trim(),
       _password.text.trim(),
@@ -127,15 +147,44 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _loading = false);
 
     if (res["ok"]) {
+      print("✅ Signup successful!");
+      
+      // CRITICAL: Save user data to SharedPreferences IMMEDIATELY after successful signup
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('username', _username.text.trim());
+      await prefs.setString('full_name', _fullName.text.trim());
+      await prefs.setString('email', _email.text.trim());
+      await prefs.setString('phone', _phone.text.trim());
+      await prefs.setString('province', _selectedProvince!);
+      await prefs.setString('municipality', _selectedMunicipality!);
+      await prefs.setString('barangay', _selectedBarangay!);
+      
+      print("✅ User data saved to SharedPreferences!");
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Account created successfully!")),
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Text("✅ Account created successfully!"),
+            ],
+          ),
+          backgroundColor: Colors.green,
+        ),
       );
+
+      // Wait a moment then go to login
+      await Future.delayed(const Duration(seconds: 1));
+      
+      if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
     } else {
+      print("❌ Signup failed: ${res['error']}");
       _showError(res['error'] ?? "Signup failed");
     }
   }
@@ -143,7 +192,13 @@ class _SignupScreenState extends State<SignupScreen> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("❌ $message"),
+        content: Row(
+          children: [
+            const Icon(Icons.error, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text("❌ $message")),
+          ],
+        ),
         backgroundColor: Colors.red,
       ),
     );
