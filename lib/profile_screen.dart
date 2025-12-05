@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 
@@ -29,40 +30,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      // Get token - FIXED METHOD NAME
-      final token = await AuthService.getValidAccessToken();
+      // First, ALWAYS load cached profile from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
       
-      if (token == null) {
+      final cachedProfile = {
+        'username': prefs.getString('username'),
+        'full_name': prefs.getString('full_name'),
+        'email': prefs.getString('email'),
+        'phone': prefs.getString('phone'),
+        'province': prefs.getString('province'),
+        'municipality': prefs.getString('municipality'),
+        'barangay': prefs.getString('barangay'),
+      };
+
+      print("📋 Cached Profile Data:");
+      print("   Username: ${cachedProfile['username']}");
+      print("   Full Name: ${cachedProfile['full_name']}");
+      print("   Email: ${cachedProfile['email']}");
+      print("   Phone: ${cachedProfile['phone']}");
+      print("   Province: ${cachedProfile['province']}");
+      print("   Municipality: ${cachedProfile['municipality']}");
+      print("   Barangay: ${cachedProfile['barangay']}");
+
+      // If we have cached data, show it immediately
+      if (cachedProfile['username'] != null) {
         if (mounted) {
           setState(() {
+            _profile = cachedProfile;
             _loading = false;
-            _error = "Not logged in";
           });
         }
-        return;
-      }
-
-      print("🔑 Token obtained, fetching profile...");
-
-      // Fetch profile from API
-      final response = await http.get(
-        Uri.parse('${AuthService.baseUrl}/api/profile'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 10));
-
-      print("📡 API Response Status: ${response.statusCode}");
-      print("📡 API Response Body: ${response.body}");
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        print("✅ Displaying cached profile data");
+      } else {
+        // No cached data - try to fetch from API
+        print("⚠️ No cached profile data, attempting API fetch...");
         
-        setState(() {
-          _profile = {
+        final token = await AuthService.getValidAccessToken();
+        
+        if (token == null) {
+          print("❌ No valid token found");
+          if (mounted) {
+            setState(() {
+              _loading = false;
+              _error = "Session expired. Please login again.";
+            });
+          }
+          return;
+        }
+
+        print("🔑 Token found, fetching from API...");
+
+        final response = await http.get(
+          Uri.parse('${AuthService.baseUrl}/api/profile'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 10));
+
+        print("📡 API Response Status: ${response.statusCode}");
+        print("📡 API Response Body: ${response.body}");
+
+        if (!mounted) return;
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          
+          final fetchedProfile = {
             'username': data['username']?.toString(),
             'full_name': data['full_name']?.toString() ?? data['fullName']?.toString(),
             'email': data['email']?.toString(),
@@ -71,24 +105,94 @@ class _ProfileScreenState extends State<ProfileScreen> {
             'municipality': data['municipality']?.toString(),
             'barangay': data['barangay']?.toString(),
           };
-          _loading = false;
-        });
 
-        print("✅ Profile loaded: $_profile");
-      } else {
-        setState(() {
-          _loading = false;
-          _error = "Failed to load profile (Status: ${response.statusCode})";
-        });
+          // Save to cache
+          if (fetchedProfile['username'] != null) {
+            await prefs.setString('username', fetchedProfile['username']!);
+          }
+          if (fetchedProfile['full_name'] != null) {
+            await prefs.setString('full_name', fetchedProfile['full_name']!);
+          }
+          if (fetchedProfile['email'] != null) {
+            await prefs.setString('email', fetchedProfile['email']!);
+          }
+          if (fetchedProfile['phone'] != null) {
+            await prefs.setString('phone', fetchedProfile['phone']!);
+          }
+          if (fetchedProfile['province'] != null) {
+            await prefs.setString('province', fetchedProfile['province']!);
+          }
+          if (fetchedProfile['municipality'] != null) {
+            await prefs.setString('municipality', fetchedProfile['municipality']!);
+          }
+          if (fetchedProfile['barangay'] != null) {
+            await prefs.setString('barangay', fetchedProfile['barangay']!);
+          }
+
+          setState(() {
+            _profile = fetchedProfile;
+            _loading = false;
+          });
+
+          print("✅ Profile loaded from API and cached");
+        } else {
+          setState(() {
+            _loading = false;
+            _error = "Failed to load profile. Please try again.";
+          });
+        }
       }
     } catch (e) {
       print("❌ Error loading profile: $e");
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = "Error: $e";
+          _error = "Error loading profile. Please check your connection.";
         });
       }
+    }
+  }
+
+  Future<void> _debugStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = await AuthService.getValidAccessToken();
+    
+    final debugInfo = '''
+DEBUG INFO:
+==========
+Token exists: ${token != null}
+Token length: ${token?.length ?? 0}
+
+SHARED PREFERENCES:
+Username: ${prefs.getString('username')}
+Full Name: ${prefs.getString('full_name')}
+Email: ${prefs.getString('email')}
+Phone: ${prefs.getString('phone')}
+Province: ${prefs.getString('province')}
+Municipality: ${prefs.getString('municipality')}
+Barangay: ${prefs.getString('barangay')}
+
+ALL KEYS: ${prefs.getKeys().toList()}
+    ''';
+    
+    print(debugInfo);
+    
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Debug Info"),
+          content: SingleChildScrollView(
+            child: SelectableText(debugInfo),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -134,6 +238,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: _debugStorage,
+            tooltip: "Debug",
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadProfile,
             tooltip: "Refresh",
@@ -158,32 +267,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
             )
           : _error != null
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error_outline, 
-                        size: 64, 
-                        color: Colors.red,
-                      ),
-                      const SizedBox(height: 16),
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline, 
+                          size: 64, 
+                          color: Colors.red,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
                           _error!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.red),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 16,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: _loadProfile,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text("Retry"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2C7A2C),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _loadProfile,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text("Retry"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2C7A2C),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 12,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: _debugStorage,
+                          icon: const Icon(Icons.bug_report),
+                          label: const Text("Show Debug Info"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton(
+                          onPressed: _logout,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                          ),
+                          child: const Text("Login Again"),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : _buildProfileContent(),
@@ -238,7 +375,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Name
                 Text(
                   name,
                   style: const TextStyle(
@@ -249,7 +385,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 4),
-                // Username
                 Text(
                   "@$username",
                   style: TextStyle(
@@ -261,13 +396,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
-          // Profile Information Cards
           Padding(
             padding: const EdgeInsets.all(18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Account Information Section
                 _sectionHeader("Account Information", Icons.person),
                 const SizedBox(height: 12),
                 _infoCard("Username", p["username"], Icons.account_circle),
@@ -277,7 +410,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 24),
 
-                // Location Information Section
                 _sectionHeader("Location Information", Icons.location_on),
                 const SizedBox(height: 12),
                 _infoCard("Province", p["province"], Icons.map),
@@ -286,7 +418,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 30),
 
-                // Action Buttons
                 Row(
                   children: [
                     Expanded(
