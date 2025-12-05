@@ -95,7 +95,7 @@ class AuthService {
       );
 
       print("🔐 Login Response Status: ${response.statusCode}");
-      print("🔐 Login Response Body: ${response.body}");
+      print("📄 Login Response Body: ${response.body}");
 
       if (response.headers["content-type"]?.contains("application/json") != true) {
         return {
@@ -125,22 +125,15 @@ class AuthService {
         await prefs.setString(_usernameKey, username);
         await prefs.setBool(_isAdminKey, data["is_admin"] ?? false);
 
-        // Try to fetch full profile from server
-        print("📡 Attempting to fetch full profile...");
+        // CRITICAL FIX: Always try to fetch full profile from server after login
+        print("📡 Fetching full profile from server...");
         final profileFetched = await _fetchAndStoreProfile();
         
-        if (!profileFetched) {
-          print("⚠️ Could not fetch profile from server, storing login data");
-          // Store whatever data we got from login response
-          if (data["user"] != null) {
-            final user = data["user"];
-            await prefs.setString(_fullNameKey, user["full_name"] ?? user["fullName"] ?? "");
-            await prefs.setString(_emailKey, user["email"] ?? "");
-            await prefs.setString(_phoneKey, user["phone"] ?? user["contact"] ?? "");
-            await prefs.setString(_provinceKey, user["province"] ?? "");
-            await prefs.setString(_municipalityKey, user["municipality"] ?? "");
-            await prefs.setString(_barangayKey, user["barangay"] ?? "");
-          }
+        if (profileFetched) {
+          print("✅ Profile loaded and saved from server");
+        } else {
+          print("⚠️ Could not fetch profile from server");
+          // Even if profile fetch fails, we still have a valid login
         }
 
         return {"ok": true};
@@ -172,6 +165,7 @@ class AuthService {
     }
 
     try {
+      print("📝 Sending signup request...");
       final response = await http.post(
         Uri.parse("$baseUrl/signup"),
         headers: {
@@ -195,12 +189,33 @@ class AuthService {
         },
       );
 
-      print("📝 Signup Response Status: ${response.statusCode}");
-      print("📝 Signup Response Body: ${response.body}");
+      print("📄 Signup Response Status: ${response.statusCode}");
+      print("📄 Signup Response Body: ${response.body}");
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        // CRITICAL: Save signup data immediately to SharedPreferences
+        // This ensures data persists even if login profile fetch fails
+        final prefs = await SharedPreferences.getInstance();
+        
+        await prefs.setString(_usernameKey, sanitizeInput(username));
+        await prefs.setString(_fullNameKey, sanitizeInput(fullName));
+        await prefs.setString(_emailKey, sanitizeInput(email));
+        await prefs.setString(_phoneKey, sanitizeInput(phone));
+        await prefs.setString(_provinceKey, sanitizeInput(province));
+        await prefs.setString(_municipalityKey, sanitizeInput(municipality));
+        await prefs.setString(_barangayKey, sanitizeInput(barangay));
+        
+        print("✅ Signup data saved to SharedPreferences");
+        print("   Username: ${sanitizeInput(username)}");
+        print("   Full Name: ${sanitizeInput(fullName)}");
+        print("   Email: ${sanitizeInput(email)}");
+        print("   Phone: ${sanitizeInput(phone)}");
+        print("   Province: ${sanitizeInput(province)}");
+        print("   Municipality: ${sanitizeInput(municipality)}");
+        print("   Barangay: ${sanitizeInput(barangay)}");
+        
         return {"ok": true};
       }
 
@@ -245,38 +260,53 @@ class AuthService {
 
         // Handle multiple possible response formats
         final username = data["username"]?.toString() ?? 
-                        data["user"]?["username"]?.toString() ?? "";
+                        data["user"]?["username"]?.toString();
         
         final fullName = data["full_name"]?.toString() ?? 
                         data["fullName"]?.toString() ?? 
                         data["user"]?["full_name"]?.toString() ?? 
-                        data["user"]?["fullName"]?.toString() ?? "";
+                        data["user"]?["fullName"]?.toString();
         
         final email = data["email"]?.toString() ?? 
-                     data["user"]?["email"]?.toString() ?? "";
+                     data["user"]?["email"]?.toString();
         
         final phone = data["phone"]?.toString() ?? 
                      data["contact"]?.toString() ?? 
                      data["user"]?["phone"]?.toString() ?? 
-                     data["user"]?["contact"]?.toString() ?? "";
+                     data["user"]?["contact"]?.toString();
         
         final province = data["province"]?.toString() ?? 
-                        data["user"]?["province"]?.toString() ?? "";
+                        data["user"]?["province"]?.toString();
         
         final municipality = data["municipality"]?.toString() ?? 
-                            data["user"]?["municipality"]?.toString() ?? "";
+                            data["user"]?["municipality"]?.toString();
         
         final barangay = data["barangay"]?.toString() ?? 
-                        data["user"]?["barangay"]?.toString() ?? "";
+                        data["user"]?["barangay"]?.toString();
 
-        // Save all profile data
-        if (username.isNotEmpty) await prefs.setString(_usernameKey, username);
-        if (fullName.isNotEmpty) await prefs.setString(_fullNameKey, fullName);
-        if (email.isNotEmpty) await prefs.setString(_emailKey, email);
-        if (phone.isNotEmpty) await prefs.setString(_phoneKey, phone);
-        if (province.isNotEmpty) await prefs.setString(_provinceKey, province);
-        if (municipality.isNotEmpty) await prefs.setString(_municipalityKey, municipality);
-        if (barangay.isNotEmpty) await prefs.setString(_barangayKey, barangay);
+        // Only overwrite existing values if new values are not empty
+        // This preserves signup data if server returns incomplete data
+        if (username != null && username.isNotEmpty) {
+          await prefs.setString(_usernameKey, username);
+        }
+        if (fullName != null && fullName.isNotEmpty) {
+          await prefs.setString(_fullNameKey, fullName);
+        }
+        if (email != null && email.isNotEmpty) {
+          await prefs.setString(_emailKey, email);
+        }
+        if (phone != null && phone.isNotEmpty) {
+          await prefs.setString(_phoneKey, phone);
+        }
+        if (province != null && province.isNotEmpty) {
+          await prefs.setString(_provinceKey, province);
+        }
+        if (municipality != null && municipality.isNotEmpty) {
+          await prefs.setString(_municipalityKey, municipality);
+        }
+        if (barangay != null && barangay.isNotEmpty) {
+          await prefs.setString(_barangayKey, barangay);
+        }
 
         print("✅ Profile data stored successfully");
         print("   Username: $username");
